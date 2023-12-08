@@ -29,7 +29,14 @@ medusa-llm"><b>Playground</b></a> |
   <img src="./figs/benchmark.png" alt="benchmark" width="790">
 </p>
 
-EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new baseline for fast decoding of Large Language Models (LLMs) with provable performance maintenance. This approach involves extrapolating the second-top-layer contextual feature vectors of LLMs, enabling a significant boost in generation efficiency—up to **3x** faster than vanilla decoding—while maintaining the consistency in the distribution of generated texts. FLYER stands out as a more efficient alternative to speculative decoding techniques like Medusa and Lookahead, being **1.6x** faster than Medusa and **2x** faster than Lookahead on 13B-size LLMs (see the benchmark below). The method's efficiency is expected to further increase when combined with other compatible techniques such as vLLM, Mamba, FlashAttention, and quantization.
+EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new baseline for fast decoding of Large Language Models (LLMs) with provable performance maintenance. This approach involves extrapolating the second-top-layer contextual feature vectors of LLMs, enabling a significant boost in generation efficiency
+- [ ] EAGLE is:
+	- **3x** faster than vanilla decoding
+ 	- **1.6x** faster than Medusa
+  	- **2x** faster than Lookahead
+  	- trainable and testable on RTX 3090 GPUs
+
+—up to **3x** faster than vanilla decoding—while maintaining the consistency in the distribution of generated texts. FLYER stands out as a more efficient alternative to speculative decoding techniques like Medusa and Lookahead, being **1.6x** faster than Medusa and **2x** faster than Lookahead . The method's efficiency is expected to further increase when combined with other compatible techniques such as vLLM, Mamba, FlashAttention, and quantization.
 
 <p align="center">
   <img src="./figs/demosmall.gif" alt="demogif">
