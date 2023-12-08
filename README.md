@@ -1,3 +1,7 @@
+<p align="center">
+| <a href="https://sites.google.com/view/
+medusa-llm"><b>Blog</b></a> |
+</p>
 
 ## Introduction
 
