@@ -128,7 +128,7 @@ If you need specific acceleration ratios, you will also need to run the followin
 ```bash
 python -m evaluation.gen_baseline_answer_vicuna\
 		(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of EAGLE's weight]\ 
+		 --ea-model-path [path of EAGLE weight]\ 
 		 --base-model-path [path of the original model]\
 ```
 
