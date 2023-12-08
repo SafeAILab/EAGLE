@@ -34,9 +34,9 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 **The sequence of LLM feature vectors is compressible, making the prediction of subsequent feature vectors from previous ones easy.**
 
 - EAGLE is:
-	- **3x** faster than vanilla decoding.
- 	- **2x** faster than Lookahead.
- 	- **1.6x** faster than Medusa.
+	- **3x** faster than vanilla decoding (13B).
+ 	- **2x** faster than Lookahead (13B).
+ 	- **1.6x** faster than Medusa (13B).
   	- trainable and testable on RTX 3090 GPUs. So even the GPU poor is affordable.
 	- combinable with other parallelable techniques such as vLLM, Mamba, FlashAttention, quantization, and hardware optimization.
 
