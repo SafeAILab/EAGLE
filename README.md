@@ -30,7 +30,7 @@ eagle-llm"><b>Blog</b></a> | <a href="https://46019f81d5df5243a2.gradio.live/"><
 
 EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new baseline for fast decoding of Large Language Models (LLMs) with provable performance maintenance. This approach involves extrapolating the second-top-layer contextual feature vectors of LLMs, enabling a significant boost in generation efficiency. Theoretically driven (stay tuned for our upcoming paper), EAGLE is building upon the following First Principle:
 
-**The sequence of LLM feature vectors is compressible, making the prediction of subsequent feature vectors from previous ones easy.**
+**The sequence of LLM feature vectors is compressible over time, making the prediction of subsequent feature vectors from previous ones easy.**
 
 - EAGLE is:
 	- **3x** faster than vanilla decoding (13B).
