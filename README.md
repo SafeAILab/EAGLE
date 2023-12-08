@@ -1,4 +1,4 @@
-<img src="figs/logo.png" alt="EAGLE" width="160" align="left"><div align="center"><h1>&nbsp;EAGLE: Lossless Acceleration of LLM Decoding by Feature Extrapolation</h1></div>
+<img src="figs/logo.png" alt="EAGLE" width="180" align="left"><div align="center"><h1>&nbsp;EAGLE: Lossless Acceleration of LLM Decoding by Feature Extrapolation</h1></div>
 
 <p align="center">
 | <a href="https://sites.google.com/view/
