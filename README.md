@@ -35,7 +35,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
  	- **2x** faster than Lookahead.
  	- **1.6x** faster than Medusa.
   	- trainable and testable on RTX 3090 GPUs. So even the GPU poor is affordable.
-	- combinable with other compatible techniques such as vLLM, Mamba, FlashAttention, and quantization.
+	- combinable with other parallelable techniques such as vLLM, Mamba, FlashAttention, quantization, and hardware optimization.
 
 <p align="center">
   <img src="./figs/demosmall.gif" alt="demogif">
