@@ -88,7 +88,7 @@ cd train
 accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 --cpdir [path of checkpoints]
 ```
-## evaluation
+## Evaluation
 You can test the speed of EaInfer on MT-bench using the following command.
 ```bash
 python -m evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
