@@ -37,6 +37,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 	- **3x** faster than vanilla decoding (13B).
  	- **2x** faster than Lookahead (13B).
  	- **1.6x** faster than Medusa (13B).
+  	- provably maintaining the consistency in the distribution of generated texts.
   	- trainable and testable on RTX 3090 GPUs. So even the GPU poor is affordable.
 	- combinable with other parallelled techniques such as vLLM, Mamba, FlashAttention, quantization, and hardware optimization.
 
