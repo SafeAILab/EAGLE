@@ -29,7 +29,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 </p>
 
 <p align="center">
-  <img src="./figs/benchmark.png" alt="benchmark" width="750">
+  <img src="./figs/benchmark.png" alt="benchmark" width="790">
 </p>
 
 ## Contents
