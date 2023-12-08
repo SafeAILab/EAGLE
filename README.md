@@ -1,3 +1,5 @@
+<img src="assets/logo.png" alt="EAGLE" width="100" align="left"><div align="center"><h1>&nbsp;Lossless Acceleration of LLM Decoding by Feature Extrapolation</h1></div>
+
 <p align="center">
 | <a href="https://sites.google.com/view/
 medusa-llm"><b>Blog</b></a> |
