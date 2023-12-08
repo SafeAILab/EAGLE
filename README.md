@@ -2,7 +2,7 @@
 
 <p align="center">
 | <a href="https://sites.google.com/view/
-medusa-llm"><b>Blog</b></a> | <a href="https://sites.google.com/view/
+eagle-llm"><b>Blog</b></a> | <a href="https://sites.google.com/view/
 medusa-llm"><b>Playground</b></a> |
 </p>
 
