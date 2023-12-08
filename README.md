@@ -83,7 +83,7 @@ The inference code we provide automatically allocates model weights (loading a m
 ### With UI
 We have provided a suggested web interface, which you can use by running the following command. After the model is fully loaded, a URL will be output in the terminal, which you can enter into your browser to access.
 ```bash
-python -m application.webui --ea-model-path [path of EAGLE's weight]\ 
+python -m application.webui --ea-model-path [path of EAGLE weight]\ 
 		--base-model-path [path of the original model]\
 		--model-type [vicuna or llama-2-chat]
 ```
@@ -121,7 +121,7 @@ accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
 python -m evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of EAGLE's weight]\ 
+		 --ea-model-path [path of EAGLE weight]\ 
 		 --base-model-path [path of the original model]\
 ```
 If you need specific acceleration ratios, you will also need to run the following command to get the speed of vanilla auto-regression.
