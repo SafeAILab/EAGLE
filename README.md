@@ -42,6 +42,8 @@ _Inference is conducted on 4 x RTX 3090 GPUs at fp16 precision. For an enhanced 
 - [Introduction](#introduction)
 - [Contents](#contents)
 - [Setup & Installation](#setup--installation)
+- [EAGLE Weights](#eagle-weights)
+- [Inference](#inference)
 
 ## Setup & Installation
 
