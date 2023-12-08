@@ -75,7 +75,7 @@ pip install -r requirements.txt
 | Vicuna 33B | [yuhuili/EAGLE-Vicuna-33B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-33B-v1.3)| LLaMA2-Chat 70B| [yuhuili/EAGLE-llama2-chat-70B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-70B)|
 
 ## Inference
-The inference code we provide automatically allocates model weights (loading a model across multiple GPUs), allowing you to run models that exceed the memoryof a single GPU.
+The inference code we provide automatically allocates model weights (loading a model across multiple GPUs), allowing you to run models that exceed the memory of a single GPU.
 
 ### With UI
 We have provided a suggested web interface, which you can use by running the following command. After the model is fully loaded, a URL will be output in the terminal, which you can enter into your browser to access.
