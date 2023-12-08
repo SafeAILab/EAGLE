@@ -9,7 +9,7 @@ medusa-llm"><b>Playground</b></a> |
 
 <p align="center">
   <a href="">
-    <img src="https://img.shields.io/badge/Version-v1.0.0-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/Version-v1.0.0-orange.svg" alt="Version">
   </a>
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
