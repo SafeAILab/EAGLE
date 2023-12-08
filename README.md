@@ -101,6 +101,9 @@ input_ids = torch.as_tensor(input_ids).cuda()
 output_ids=model.eagenerate(input_ids,temperature=0.5,max_new_tokens=512)
 output=model.tokenizer.decode(output_ids[0])
 ```
+
+_The current repository only supports a batch size of 1. We plan to update it in the future to support a batch size greater than 1._
+
 ## Train
 
 ### Generate Train Data
