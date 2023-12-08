@@ -34,6 +34,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 <p align="center">
   <img src="./figs/demosmall.gif" alt="demogif">
 </p>
+*Inference is conducted on 4 x RTX 3090 GPUs at fp16 precision. For an enhanced viewing experience, the animation has been sped up fourfold.*
 
 ## Contents
 
