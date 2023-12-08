@@ -93,7 +93,7 @@ You can use our provided "eagenerate" for speedup generation just like using 'ge
 from model.ea_model import EaModel
 model = EaModel.from_pretrained(  
     base_model_path=base_model_path,  
-    ea_model_path=eainfer_model_path,  
+    ea_model_path=EAGLE_model_path,  
     torch_dtype=torch.float16,  
     low_cpu_mem_usage=True,  
     device_map="auto"  
@@ -118,17 +118,17 @@ accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 --cpdir [path of checkpoints]
 ```
 ## Evaluation
-You can test the speed of EaInfer on MT-bench using the following command.
+You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
 python -m evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of eainfer's weight]\ 
+		 --ea-model-path [path of EAGLE's weight]\ 
 		 --base-model-path [path of the original model]\
 ```
 If you need specific acceleration ratios, you will also need to run the following command to get the speed of vanilla auto-regression.
 ```bash
 python -m evaluation.gen_baseline_answer_vicuna\
 		(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of eainfer's weight]\ 
+		 --ea-model-path [path of EAGLE's weight]\ 
 		 --base-model-path [path of the original model]\
 ```
 
