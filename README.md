@@ -69,7 +69,7 @@ pip install -r requirements.txt
 
 ## EAGLE Weights
 
-| Base Model  | EAGLE on Hugging Face  | trainable parameter | Base Model  | EAGLE on Hugging Face  | trainable parameter|
+| Base Model  | EAGLE on Hugging Face  | \# Trainable Parameters | Base Model  | EAGLE on Hugging Face  | \# Trainable Parameters |
 |------|------|------|------|------|------|
 | Vicuna 7B | [yuhuili/EAGLE-Vicuna-7B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-7B-v1.3) | 0.24B | LLaMA2-Chat 7B | [yuhuili/EAGLE-llama2-chat-7B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-7B) | 0.24B |
 | Vicuna 13B | [yuhuili/EAGLE-Vicuna-13B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-13B-v1.3) | 0.37B | LLaMA2-Chat 13B | [yuhuili/EAGLE-llama2-chat-13B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-13B) | 0.37B |
