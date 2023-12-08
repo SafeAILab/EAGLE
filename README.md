@@ -23,7 +23,7 @@ medusa-llm"><b>Playground</b></a> |
 </p>
 
 
-## Introduction
+##
 
 <p align="center">
   <img src="./figs/benchmark.png" alt="benchmark" width="790">
