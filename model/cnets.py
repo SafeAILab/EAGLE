@@ -570,9 +570,9 @@ class Model(nn.Module):
             attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length
         )
 
-        if self.gradient_checkpointing and self.training:
-            if use_cache:
-                use_cache = False
+        # if self.gradient_checkpointing and self.training:
+        #    if use_cache:
+        #        use_cache = False
 
 
         #hidden_states=self.act(self.fc(torch.cat((inputs_embeds,hidden_states),dim=-1)))
