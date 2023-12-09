@@ -10,9 +10,7 @@ import os
 from huggingface_hub import hf_hub_download
 from .cnets import Model
 from .configs import EConfig
-
-
-
+from huggingface_hub import hf_hub_download
 
 
 class ResBlock(nn.Module):
@@ -49,12 +47,11 @@ class ResBlock(nn.Module):
 
 class EaModel(nn.Module):
 
-
     def __init__(
-        self,
-        base_model,
-        base_model_name_or_path,
-        ea_model_path,
+            self,
+            base_model,
+            base_model_name_or_path,
+            ea_model_path,
     ):
 
         super().__init__()
@@ -67,12 +64,9 @@ class EaModel(nn.Module):
         config = EConfig.from_pretrained(ea_model_path)
         self.ea_layer = Model(config)
 
-
         device = base_model.model.layers[-1].self_attn.q_proj.weight.device
         self.ea_layer.to(self.base_model.dtype).to(device)
         self.ea_layer.init_tree()
-
-
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.
@@ -84,41 +78,44 @@ class EaModel(nn.Module):
 
     @classmethod
     def from_pretrained(
-        cls,
-        base_model_path=None,
-        ea_model_path=None,
-        **kwargs,
+            cls,
+            base_model_path=None,
+            ea_model_path=None,
+            **kwargs,
     ):
 
-
-            
         base_model = KVLlamaForCausalLM.from_pretrained(
             base_model_path, **kwargs
         )
 
+        configpath=os.path.join(ea_model_path,"config.json")
+        if not os.path.exists(configpath):
+            configpath = hf_hub_download(ea_model_path, "config.json")
         model = cls(
             base_model,
             base_model_path,
-            ea_model_path
+            configpath
         )
-
-        ea_layer_state_dict = torch.load(os.path.join(ea_model_path,"pytorch_model.bin"), map_location=base_model.device)
+        load_model_path=os.path.join(ea_model_path, "pytorch_model.bin")
+        if not os.path.exists(load_model_path):
+            load_model_path=hf_hub_download(ea_model_path, "pytorch_model.bin")
+        ea_layer_state_dict = torch.load(load_model_path,
+                                         map_location=base_model.device)
         model.ea_layer.load_state_dict(ea_layer_state_dict, strict=False)
 
         return model
 
     def forward(
-        self,
-        input_ids=None,
-        attention_mask=None,
-        labels=None,
-        past_key_values=None,
-        output_orig=False,
-        position_ids=None,
-        init=True,
-        logits_processor=None
+            self,
+            input_ids=None,
+            attention_mask=None,
+            labels=None,
+            past_key_values=None,
+            output_orig=False,
+            position_ids=None,
+            init=True,
+            logits_processor=None
     ):
-
 
         with torch.inference_mode():
             # Pass input through the base model
@@ -133,40 +130,40 @@ class EaModel(nn.Module):
             hidden_states = outputs[0].clone()
         if init:
             if logits_processor is not None:
-                logits=orig[:, -1]
-                logits=logits_processor(None,logits)
+                logits = orig[:, -1]
+                logits = logits_processor(None, logits)
                 probabilities = torch.nn.functional.softmax(logits, dim=1)
-                token=torch.multinomial(probabilities, 1)
+                token = torch.multinomial(probabilities, 1)
             else:
-                token = torch.argmax(orig[:,-1])
-                token=token[None,None]
-            input_ids=torch.cat((input_ids,token.to(input_ids.device)),dim=1)
+                token = torch.argmax(orig[:, -1])
+                token = token[None, None]
+            input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
-            ea_logits = self.ea_layer.topK_genrate(hidden_states,input_ids,self.base_model.lm_head,logits_processor)
+            ea_logits = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
             if output_orig:
-                return ea_logits, outputs, orig,hidden_states,token
-            return ea_logits,hidden_states,token
+                return ea_logits, outputs, orig, hidden_states, token
+            return ea_logits, hidden_states, token
         else:
             if output_orig:
-                return outputs,orig,hidden_states
+                return outputs, orig, hidden_states
 
     @torch.no_grad()
     def eagenerate(
-        self,
-        input_ids,
-        temperature=0.0,
-        top_p=0.0,
-        top_k=0.0,
-        max_new_tokens=512,
-        max_length=2048,
-        tree_choices=mc_sim_7b_63,
+            self,
+            input_ids,
+            temperature=0.0,
+            top_p=0.0,
+            top_k=0.0,
+            max_new_tokens=512,
+            max_length=2048,
+            tree_choices=mc_sim_7b_63,
 
     ):
-        if temperature>1e-5:
-            logits_processor=prepare_logits_processor(temperature=temperature,top_p=top_p,top_k=top_k)
+        if temperature > 1e-5:
+            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
         else:
-            logits_processor=None
+            logits_processor = None
         assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
         # Avoid modifying the input_ids in-place
         input_ids = input_ids.clone()
@@ -241,7 +238,6 @@ class EaModel(nn.Module):
                 hidden_state_new,
                 sample_p
             )
-
 
             if self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
                 return input_ids
