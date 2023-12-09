@@ -94,6 +94,7 @@ model = EaModel.from_pretrained(
     low_cpu_mem_usage=True,  
     device_map="auto"  
 )
+model.eval()
 prompt="Hello"
 input_ids=model.tokenizer([prompt]).input_ids
 input_ids = torch.as_tensor(input_ids).cuda()
