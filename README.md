@@ -2,7 +2,7 @@
 
 <p align="center">
 | <a href="https://sites.google.com/view/
-eagle-llm"><b>Blog</b></a> | <a href="https://46019f81d5df5243a2.gradio.live/"><b>Playground</b></a> |
+eagle-llm"><b>Blog</b></a> |
 </p>
 
 
