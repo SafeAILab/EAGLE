@@ -19,6 +19,7 @@ from fastchat.model import get_conversation_template
 from model.utils import *
 from model.ea_model import EaModel
 from model.kv_cache import initialize_past_key_values
+from model.choices import *
 
 
 
