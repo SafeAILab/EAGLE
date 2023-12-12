@@ -119,6 +119,7 @@ output_ids=model.eagenerate(input_ids,temperature=0.5,max_new_tokens=512)
 output=model.tokenizer.decode(output_ids[0])
 ```
 
+**_Note: Vicuna and LLaMA2-Chat are both chat models. You need to use the correct chat template, otherwise it will cause abnormal output from the model and affect the performance of EAGLE._**
 _The current repository only supports a batch size of 1. We plan to update it in the future to support a batch size greater than 1._
 
 ## Train
@@ -148,6 +149,7 @@ python -m evaluation.gen_baseline_answer_vicuna\
 		 --ea-model-path [path of EAGLE weight]\ 
 		 --base-model-path [path of the original model]\
 ```
+The above two commands will each generate a .jsonl file that records the generation results and wall time. Then, you can use evaluation/speed.py to calculate the ratio of speeds.
 
 ## Acknowledgements
 
