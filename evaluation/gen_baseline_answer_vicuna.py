@@ -176,7 +176,7 @@ def get_model_answers(
     # warmup
     for _ in range(3):
         torch.manual_seed(0)
-        conv = get_conversation_template(model_id)
+        conv = get_conversation_template("vicuna")
         turns = []
         idxs = []
         new_tokens = []
@@ -244,7 +244,7 @@ def get_model_answers(
         choices = []
         for i in range(num_choices):
             torch.manual_seed(i)
-            conv = get_conversation_template(model_id)
+            conv = get_conversation_template("vicuna")
             turns = []
             idxs = []
             new_tokens = []
