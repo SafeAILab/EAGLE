@@ -38,7 +38,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
  	- **1.6x** faster than <a href="https://sites.google.com/view/medusa-llm"><b>Medusa</b></a> (13B).
   	- provably maintaining the consistency with vanilla decoding in the distribution of generated texts.
   	- trainable (within 1-2 days) and testable on 8x RTX 3090 GPUs. So even the GPU poor can afford it.
-	- combinable with other parallelled techniques such as vLLM, Mamba, FlashAttention, quantization, and hardware optimization.
+	- combinable with other parallelled techniques such as vLLM, DeepSpeed, Mamba, FlashAttention, quantization, and hardware optimization.
 
 <p align="center">
   <img src="./figs/demosmall.gif" alt="demogif">
