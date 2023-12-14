@@ -1,14 +1,19 @@
 import argparse
 parser = argparse.ArgumentParser(description='sp')
+parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/vicuna_v13/7B/')
+parser.add_argument('--configpath', type=str, default="config.json")
+parser.add_argument('--lr', type=float, default=3e-5)
+parser.add_argument('--bs', type=int, default=4)
+parser.add_argument('--gradient-accumulation-steps', type=int, default=8)
 parser.add_argument('--tmpdir', type=str, default='0')
 parser.add_argument('--outdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
 args = parser.parse_args()
 
 train_config={
-    "lr":3e-5,
-    "bs":4,
-    "gradient_accumulation_steps":8,
+    "lr":args.lr,
+    "bs":args.bs,
+    "gradient_accumulation_steps":args.gradient_accumulation_steps,
     "datapath":f"{args.tmpdir}",
     "is_warmup":True,
     "num_epochs":200,
@@ -26,12 +31,12 @@ train_config={
     "std":0.2,
     "residual":"true,norm",
     "max_len":2048,
-    "config_path":"config.json",
+    "config_path":args.configpath,
     "b1":0.9,
     "b2": 0.95,
     "grad_clip": 0.5,
 }
-
+import json
 from safetensors import safe_open
 #from transformers import AutoModelForCausalLM, AutoTokenizer,AutoModelForSequenceClassification
 import os
@@ -53,7 +58,7 @@ from torch.utils.data import Dataset,DataLoader
 from tqdm import tqdm
 # import accelerate
 import numpy as np
-from transformers import PreTrainedTokenizerBase,get_linear_schedule_with_warmup
+from transformers import PreTrainedTokenizerBase,get_linear_schedule_with_warmup,AutoConfig
 
 
 if accelerator.is_main_process:
@@ -61,15 +66,29 @@ if accelerator.is_main_process:
     wandb.init(project="ess", entity="yuhui-li",config=train_config)
 
 
+baseconfig=AutoConfig.from_pretrained(args.basepath)
 
-head=torch.nn.Linear(6656,32000,bias=False)
-with safe_open("/llama2chat/13B/model-00003-of-00003.safetensors", framework="pt",
-               device="cpu") as f:
-    tensor_slice = f.get_slice("lm_head.weight")
-    vocab_size, hidden_dim = tensor_slice.get_shape()
-    tensor = tensor_slice[:, :hidden_dim].float()
+head=torch.nn.Linear(baseconfig.hidden_size,baseconfig.vocab_size,bias=False)
+
+try:
+    with open(os.path.join(args.basepath, "model.safetensors.index.json"), "r") as f:
+        index_json = json.loads(f.read())
+        head_path = index_json["weight_map"]["lm_head.weight"]
+    with safe_open(os.path.join(args.basepath, head_path),
+                   framework="pt",
+                   device="cpu") as f:
+        tensor_slice = f.get_slice("lm_head.weight")
+        vocab_size, hidden_dim = tensor_slice.get_shape()
+        tensor = tensor_slice[:, :hidden_dim].float()
+except:
+    with open(os.path.join(args.basepath, "pytorch_model.bin.index.json"), "r") as f:
+        index_json = json.loads(f.read())
+        head_path = index_json["weight_map"]["lm_head.weight"]
+    weights = torch.load(os.path.join(args.basepath, head_path))
+    tensor = weights["lm_head.weight"].float()
+
+
 head.weight.data = tensor
-# head.load_state_dict(torch.load('/home/hongyanz/scratch/weights/headf32.ckpt'))
 head.eval()
 
 for param in head.parameters():
@@ -330,7 +349,7 @@ for epoch in range(num_epochs):
     epoch_loss=0
     num_batches=0
     model.train()
-    for batch_idx, data in enumerate(train_loader):
+    for batch_idx, data in enumerate(tqdm(train_loader)):
         # if 330<batch_idx<360:
         #     continue
         # optimizer.zero_grad()
@@ -431,7 +450,7 @@ for epoch in range(num_epochs):
     model.eval()
 
     k_acc=[[]for i in range(5)]
-    for batch_idx, data in enumerate(test_loader):
+    for batch_idx, data in enumerate(tqdm(test_loader)):
         with torch.no_grad():
             if batch_idx<10:
                 acces=getkacc(model,data,head,max_length=5)
@@ -495,7 +514,6 @@ for epoch in range(num_epochs):
         # accelerator.save_state(output_dir=f"{args.outdir}/state_{epoch}")
         # os.system(f"cp -r {args.outdir} {args.cpdir}")
         accelerator.save_state(output_dir=f"{args.cpdir}/state_{epoch}")
-
 
 
 
