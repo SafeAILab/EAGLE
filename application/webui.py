@@ -87,7 +87,7 @@ def warmup(model):
     for output_ids in model.ea_generate(input_ids):
         ol=output_ids.shape[1]
 
-def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer):
+def bot(history, temperature, top_p, use_ExInfer, highlight_EaInfer):
     if not history:
         return history,"0.00 tokens/s","0.00"
     global pure_history
