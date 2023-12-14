@@ -133,7 +133,7 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer):
 
             cu_len = output_ids.shape[1]
             colored_text = highlight_text(text, naive_text, "orange")
-            if highlight_ExInfer:
+            if highlight_EaInfer:
                 history[-1][1] = colored_text
             else:
                 history[-1][1] = text
@@ -157,7 +157,7 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer):
                                                      clean_up_tokenization_spaces=True, ))
             cu_len = output_ids.shape[1]
             colored_text = highlight_text(text, naive_text, "orange")
-            if highlight_ExInfer and use_ExInfer:
+            if highlight_EaInfer and use_EaInfer:
                 history[-1][1] = colored_text
             else:
                 history[-1][1] = text
