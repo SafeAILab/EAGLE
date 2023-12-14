@@ -319,7 +319,7 @@ if accelerator.is_main_process:
         os.makedirs(args.cpdir)
 
 config=EConfig.from_pretrained(train_config["config_path"])
-model=Model(config,load_emb=True)
+model=Model(config,load_emb=True,path=args.basepath)
 
 
 criterion=nn.SmoothL1Loss(reduction="none")
