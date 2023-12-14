@@ -452,7 +452,7 @@ def len_list(x,n):
     return [i for i in x if len(i)<=n]
 
 class Model(nn.Module):
-    def __init__(self,config,load_emb=False):
+    def __init__(self,config,load_emb=False,path=None):
         super().__init__()
 
 
@@ -465,13 +465,25 @@ class Model(nn.Module):
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         if load_emb:
             from safetensors import safe_open
-            with safe_open("weights/llama2chat/13B/model-00001-of-00003.safetensors",
-                           framework="pt",
-                           device="cpu") as f:
-                tensor_slice = f.get_slice("model.embed_tokens.weight")
-                vocab_size, hidden_dim = tensor_slice.get_shape()
-                tensor = tensor_slice[:, :hidden_dim].float()
+            import json
+            try:
+                with open(os.path.join(path,"model.safetensors.index.json"),"r") as f:
+                    index_json=json.loads(f.read())
+                    emb_path=index_json["weight_map"]["model.embed_tokens.weight"]
+                with safe_open(os.path.join(path,emb_path),
+                               framework="pt",
+                               device="cpu") as f:
+                    tensor_slice = f.get_slice("model.embed_tokens.weight")
+                    vocab_size, hidden_dim = tensor_slice.get_shape()
+                    tensor = tensor_slice[:, :hidden_dim].float()
+            except:
+                with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                weights=torch.load(os.path.join(path,emb_path))
+                tensor=weights["model.embed_tokens.weight"].float()
             self.embed_tokens.weight.data = tensor
+
 
         #self.init_tree()
 
@@ -917,4 +929,9 @@ import torch
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
 
+
+if __name__=="__main__":
+    config = EConfig.from_pretrained('config.json')
+    model = Model(config,load_emb=True,path="/home/lyh/weights/hf/vicuna_v13/7B/")
+    print(model)
 
