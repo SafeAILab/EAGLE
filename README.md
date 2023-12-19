@@ -52,7 +52,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [EAGLE Weights](#eagle-weights)
 - [Inference](#inference)
   - [With UI](#with-ui)
-  - [With code](#with-code)
+  - [With Code](#with-code)
 - [Train](#train)
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
@@ -83,7 +83,7 @@ python -m application.webui --ea-model-path [path of EAGLE weight]\
 		--base-model-path [path of the original model]\
 		--model-type [vicuna or llama-2-chat]
 ```
-### With code
+### With Code
 You can use our provided "eagenerate" for speedup generation just like using 'generate' from Hugging Face. Here is an example.
 ```python
 from model.ea_model import EaModel
