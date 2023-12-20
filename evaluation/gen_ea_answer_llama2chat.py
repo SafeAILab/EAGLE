@@ -6,7 +6,7 @@ python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fa
 import argparse
 import json
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import time
 import shortuuid
 import torch
@@ -38,6 +38,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None 
         tree_buffers = generate_tree_buffers(
             tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
         )
+        tree_buffers["retrieve_indices_head"]=tree_buffers["retrieve_indices"].to(model.base_model.lm_head.weight.device)
     model.tree_buffers = tree_buffers
     model.tree_choices = tree_choices
 
@@ -79,7 +80,7 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None 
                 past_key_values,
                 tree_buffers["tree_position_ids"],
                 input_ids,
-                tree_buffers["retrieve_indices"],
+                tree_buffers["retrieve_indices_head"],
             )
         best_candidate, accept_length,sample_p = evaluate_posterior(
                 logits, candidates, logits_processor, cart_candidates_prob
@@ -180,7 +181,7 @@ def get_model_answers(
     temperature,
     tree_choices,
 ):
-    temperature = 0.0
+    #temperature = 0.0
 
 
 
