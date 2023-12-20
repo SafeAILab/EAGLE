@@ -813,7 +813,14 @@ class Model(nn.Module):
                 out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
             self.stable_kv=past_key_values
             last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
+            if not self.diff_device:
+                last_headout = head(last_hidden)
+            else:
+                if hasattr(self, "layer_device"):
+                    last_headout = head(last_hidden)
+                    last_headout=last_headout.to(self.layer_device)
+                else:
+                    last_headout=F.linear(last_hidden,self.headweight)
 
 
 
@@ -842,8 +849,15 @@ class Model(nn.Module):
                                                    position_ids=position_ids,use_cache=True)
                 len_posi += 1
 
-
-                last_headout = head(out_hidden[0])
+                if not self.diff_device:
+                    last_headout = head(out_hidden[0])
+                else:
+                    if hasattr(self, "layer_device"):
+                        last_headout = head(out_hidden[0])
+                        last_headout = last_headout.to(self.layer_device)
+                    else:
+                        last_headout = F.linear(out_hidden[0], self.headweight)
+                #last_headout = head(out_hidden[0])
                 #sslogits.append(last_headout)
                 #print(select_index)
             topk_index, topk_prob = self.sample(last_headout, top_k)
