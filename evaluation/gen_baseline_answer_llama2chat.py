@@ -35,6 +35,8 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
         tree_buffers = generate_tree_buffers(
             tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
         )
+        tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
+            model.base_model.lm_head.weight.device)
     model.tree_buffers = tree_buffers
     model.tree_choices = tree_choices
 
@@ -147,7 +149,7 @@ def get_model_answers(
         temperature,
         tree_choices,
 ):
-    temperature = 0.0
+    #temperature = 0.0
 
     model = EaModel.from_pretrained(
         base_model_path=base_model_path,
