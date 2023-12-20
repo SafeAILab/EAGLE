@@ -198,6 +198,7 @@ def reset_past_key_values(passed_key_values):
 
 def generate_candidates(tree_logits, tree_indices, retrieve_indices,sample_token,logits_processor):
 
+    sample_token=sample_token.to(tree_indices.device)
 
     candidates_logit = sample_token[0]
 
@@ -287,7 +288,7 @@ def evaluate_posterior(
     if logits_processor is None:
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
-                candidates[:, 1:] == torch.argmax(logits[:, :-1], dim=-1)
+                candidates[:, 1:].to(logits.device) == torch.argmax(logits[:, :-1], dim=-1)
         ).int()
         candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
         accept_length = candidates_accept_length.max()
@@ -300,6 +301,7 @@ def evaluate_posterior(
         return best_candidate, accept_length,logits[best_candidate, accept_length]
 
     else:
+        cart_candidates_prob=cart_candidates_prob.to(logits.device)
         accept_length=1
         accept_cand=candidates[0][:1]
         best_candidate=0
