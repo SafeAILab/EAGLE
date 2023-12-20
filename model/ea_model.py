@@ -1,3 +1,5 @@
+import copy
+
 import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, PretrainedConfig
@@ -64,7 +66,21 @@ class EaModel(nn.Module):
         config = EConfig.from_pretrained(ea_model_path)
         self.ea_layer = Model(config)
 
+        low_memory=False
+
         device = base_model.model.layers[-1].self_attn.q_proj.weight.device
+        if device!=base_model.lm_head.weight.device:
+            self.ea_layer.diff_device = True
+            if not low_memory:
+                # self.ea_layer.head=nn.Linear(base_model.lm_head.in_features,base_model.lm_head.out_features,bias=False)
+                # self.ea_layer.head.weight=copy.deepcopy(base_model.lm_head.weight)
+                # self.ea_layer.head.to(device)
+                self.ea_layer.headweight = base_model.lm_head.weight.clone().to(device)
+            else:
+                self.ea_layer.layer_device = device
+
+        else:
+            self.ea_layer.diff_device = False
         self.ea_layer.to(self.base_model.dtype).to(device)
         self.ea_layer.init_tree()
 
@@ -175,6 +191,8 @@ class EaModel(nn.Module):
             tree_buffers = generate_tree_buffers(
                 tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
             )
+            tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
+                self.base_model.lm_head.weight.device)
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
@@ -216,7 +234,7 @@ class EaModel(nn.Module):
                 past_key_values,
                 tree_buffers["tree_position_ids"],
                 input_ids,
-                tree_buffers["retrieve_indices"],
+                tree_buffers["retrieve_indices_head"],
             )
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor, cart_candidates_prob
@@ -272,6 +290,8 @@ class EaModel(nn.Module):
             tree_buffers = generate_tree_buffers(
                 tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
             )
+            tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
+                self.base_model.lm_head.weight.device)
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
@@ -313,7 +333,7 @@ class EaModel(nn.Module):
                 past_key_values,
                 tree_buffers["tree_position_ids"],
                 input_ids,
-                tree_buffers["retrieve_indices"],
+                tree_buffers["retrieve_indices_head"],
             )
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor, cart_candidates_prob
@@ -371,6 +391,8 @@ class EaModel(nn.Module):
             tree_buffers = generate_tree_buffers(
                 tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
             )
+            tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
+                self.base_model.lm_head.weight.device)
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
