@@ -64,8 +64,13 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
     new_token = 0
 
     for idx in range(max_steps):
-
-        input_id = outputs.logits[:, -1:].argmax(dim=-1)
+        if logits_processor is not None:
+            logits = outputs.logits[:, -1]
+            logits = logits_processor(None, logits)
+            probabilities = torch.nn.functional.softmax(logits, dim=-1)
+            input_id = torch.multinomial(probabilities, 1)
+        else:
+            input_id = outputs.logits[:, -1:].argmax(dim=-1)
         outputs = model.base_model(input_id, use_cache=True, past_key_values=past_key_values)
         input_ids = torch.cat([input_ids, input_id], dim=-1)
 
