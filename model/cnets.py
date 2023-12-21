@@ -860,7 +860,11 @@ class Model(nn.Module):
                 #last_headout = head(out_hidden[0])
                 #sslogits.append(last_headout)
                 #print(select_index)
-            topk_index, topk_prob = self.sample(last_headout, top_k)
+            if logits_processor is not None:
+                topk_index, topk_prob = self.sample(last_headout, top_k)
+            else:
+                topk_index, topk_prob = torch.topk(last_headout, top_k, dim=-1).indices, torch.topk(last_headout, top_k,
+                                                                                                    dim=-1).values
             ss_token.append(topk_index)
             ss_prob.append(topk_prob)
 
