@@ -794,8 +794,9 @@ class Model(nn.Module):
     #
     #     return  sampled_indices,sampled_probs
 
-    def sample(self,tensor, k=1, replacement=False):
-        probabilities = torch.nn.functional.softmax(tensor, dim=1)
+    def sample(self,logits, logits_processor,k=1, replacement=False):
+        logits = logits_processor(None, logits)
+        probabilities = torch.nn.functional.softmax(logits, dim=1)
         if replacement:
             sampled_indices = torch.multinomial(probabilities, k, replacement=True)
             sampled_probs = torch.gather(probabilities, 1, sampled_indices)
@@ -863,7 +864,7 @@ class Model(nn.Module):
 
             for i in range(len(self.tree_buffer['tree_indices'])):
                 if logits_processor is not None:
-                    topk_index,topk_prob=self.sample(last_headout,top_k)
+                    topk_index,topk_prob=self.sample(last_headout,logits_processor,k=top_k,)
                 else:
                     topk_index,topk_prob = torch.topk(last_headout, top_k, dim=-1).indices,torch.topk(last_headout, top_k, dim=-1).values
 
@@ -899,7 +900,7 @@ class Model(nn.Module):
                 #print(select_index)
 
             if logits_processor is not None:
-                topk_index, topk_prob = self.sample(last_headout, top_k)
+                topk_index,topk_prob=self.sample(last_headout,logits_processor,k=top_k,)
             else:
                 topk_index, topk_prob = torch.topk(last_headout, top_k, dim=-1).indices, torch.topk(last_headout, top_k,
                                                                                                     dim=-1).values
