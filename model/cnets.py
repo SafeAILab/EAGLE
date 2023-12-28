@@ -797,40 +797,55 @@ class Model(nn.Module):
     def sample(self,logits, logits_processor,k=1, replacement=False):
         logits = logits_processor(None, logits)
         probabilities = torch.nn.functional.softmax(logits, dim=1)
-        if replacement:
-            sampled_indices = torch.multinomial(probabilities, k, replacement=True)
-            sampled_probs = torch.gather(probabilities, 1, sampled_indices)
-            return sampled_indices, sampled_probs
-        else:
-            sampled_indices = torch.multinomial(probabilities, k, replacement=False)
-            sampled_probs = torch.gather(probabilities, 1, sampled_indices)
+        sampled_indices = torch.multinomial(probabilities, k, replacement=False)
+        sampled_probs = torch.gather(probabilities, 1, sampled_indices)
 
-            cumulative_sum = torch.cumsum(sampled_probs, dim=1)
-            cumulative_sum = torch.cat((torch.zeros(cumulative_sum.shape[0],1, device=cumulative_sum.device), cumulative_sum[:, :-1]),dim=-1)
+        cumulative_sum = torch.cumsum(sampled_probs, dim=1)
+        cumulative_sum = torch.cat(
+            (torch.zeros(cumulative_sum.shape[0], 1, device=cumulative_sum.device), cumulative_sum[:, :-1]), dim=-1)
 
-            sampled_probs=sampled_probs/(1-cumulative_sum)
-            sampled_probs[torch.isinf(sampled_probs)] = -1
-            sampled_probs[torch.isnan(sampled_probs)] = -1
+        sampled_probs = sampled_probs / (1 - cumulative_sum)
+        sampled_probs[torch.isinf(sampled_probs)] = -1
+        sampled_probs[torch.isnan(sampled_probs)] = -1
 
-            sampled_probs = torch.clamp(sampled_probs, min=0.0, max=1.0)
+        sampled_probs = torch.clamp(sampled_probs, min=0.0, max=1.0)
 
-            # has_nan = torch.isnan(sampled_probs).any()
-            # if has_nan:
-            #     print(1)
+        return sampled_indices, sampled_probs,probabilities
 
-            # sampled_probs_list=sampled_probs[0].tolist()
-            # sum_list=[1-sum(sampled_probs_list[:i]) for i in range(len(sampled_probs_list))]
-            # for i in range(len(sampled_probs_list)):
-            #     a=sampled_probs_list[i]/(sum_list[i])
-            #     if sum_list[i]==0:
-            #         sampled_probs_list[i]=1.0
-            #     else:
-            #         sampled_probs_list[i]=sampled_probs_list[i]/(sum_list[i])
-            # sampled_probs=torch.tensor([sampled_probs_list],device=sampled_probs.device)
-
-
-
-            return sampled_indices, sampled_probs
+        # if replacement:
+        #     sampled_indices = torch.multinomial(probabilities, k, replacement=True)
+        #     sampled_probs = torch.gather(probabilities, 1, sampled_indices)
+        #     return sampled_indices, sampled_probs
+        # else:
+        #     sampled_indices = torch.multinomial(probabilities, k, replacement=False)
+        #     sampled_probs = torch.gather(probabilities, 1, sampled_indices)
+        #
+        #     cumulative_sum = torch.cumsum(sampled_probs, dim=1)
+        #     cumulative_sum = torch.cat((torch.zeros(cumulative_sum.shape[0],1, device=cumulative_sum.device), cumulative_sum[:, :-1]),dim=-1)
+        #
+        #     sampled_probs=sampled_probs/(1-cumulative_sum)
+        #     sampled_probs[torch.isinf(sampled_probs)] = -1
+        #     sampled_probs[torch.isnan(sampled_probs)] = -1
+        #
+        #     sampled_probs = torch.clamp(sampled_probs, min=0.0, max=1.0)
+        #
+        #     # has_nan = torch.isnan(sampled_probs).any()
+        #     # if has_nan:
+        #     #     print(1)
+        #
+        #     # sampled_probs_list=sampled_probs[0].tolist()
+        #     # sum_list=[1-sum(sampled_probs_list[:i]) for i in range(len(sampled_probs_list))]
+        #     # for i in range(len(sampled_probs_list)):
+        #     #     a=sampled_probs_list[i]/(sum_list[i])
+        #     #     if sum_list[i]==0:
+        #     #         sampled_probs_list[i]=1.0
+        #     #     else:
+        #     #         sampled_probs_list[i]=sampled_probs_list[i]/(sum_list[i])
+        #     # sampled_probs=torch.tensor([sampled_probs_list],device=sampled_probs.device)
+        #
+        #
+        #
+        #     return sampled_indices, sampled_probs
 
     @torch.no_grad()
     def topK_genrate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
@@ -838,7 +853,7 @@ class Model(nn.Module):
         # input_ids = torch.tensor([state[1:]])
         input_ids = input_ids[:, 1:]
         input_ids = input_ids.to(hidden_states.device)
-        ss_token,ss_prob = [],[]
+        ss_token,ss_prob,ss_op = [],[],[]
         len_posi=input_ids.shape[1]
         self.reset()
         if use_cache:
@@ -864,12 +879,14 @@ class Model(nn.Module):
 
             for i in range(len(self.tree_buffer['tree_indices'])):
                 if logits_processor is not None:
-                    topk_index,topk_prob=self.sample(last_headout,logits_processor,k=top_k,)
+                    topk_index,topk_prob,op=self.sample(last_headout,logits_processor,k=top_k,)
                 else:
                     topk_index,topk_prob = torch.topk(last_headout, top_k, dim=-1).indices,torch.topk(last_headout, top_k, dim=-1).values
+                    op=None
 
                 ss_token.append(topk_index)
                 ss_prob.append(topk_prob)
+                ss_op.append(op)
                 #topk_index = torch.topk(last_headout, top_k, dim=-1).indices
                 topk_index = topk_index.view(-1)
                 select_index=topk_index[self.tree_buffer['tree_indices'][i]]
@@ -900,18 +917,20 @@ class Model(nn.Module):
                 #print(select_index)
 
             if logits_processor is not None:
-                topk_index,topk_prob=self.sample(last_headout,logits_processor,k=top_k,)
+                topk_index,topk_prob,op=self.sample(last_headout,logits_processor,k=top_k,)
             else:
                 topk_index, topk_prob = torch.topk(last_headout, top_k, dim=-1).indices, torch.topk(last_headout, top_k,
                                                                                                     dim=-1).values
+                op=None
             ss_token.append(topk_index)
             ss_prob.append(topk_prob)
+            ss_op.append(op)
 
         else:
             # TODO
             pass
 
-        return (torch.cat(ss_token),torch.cat(ss_prob))
+        return (torch.cat(ss_token),torch.cat(ss_prob),ss_op)
 
 
 
@@ -991,4 +1010,3 @@ if __name__=="__main__":
     config = EConfig.from_pretrained('config.json')
     model = Model(config,load_emb=True,path="/home/lyh/weights/hf/vicuna_v13/7B/")
     print(model)
-
