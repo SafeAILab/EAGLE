@@ -237,7 +237,8 @@ class EaModel(nn.Module):
                 tree_buffers["retrieve_indices_head"],
             )
             best_candidate, accept_length, sample_p = evaluate_posterior(
-                logits, candidates, logits_processor, cart_candidates_prob
+                logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
+                tree_candidates, tree_buffers["b_indices"]
             )
             input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
                 input_ids,
@@ -336,7 +337,8 @@ class EaModel(nn.Module):
                 tree_buffers["retrieve_indices_head"],
             )
             best_candidate, accept_length, sample_p = evaluate_posterior(
-                logits, candidates, logits_processor, cart_candidates_prob
+                logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
+                tree_candidates, tree_buffers["b_indices"]
             )
             input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
                 input_ids,
