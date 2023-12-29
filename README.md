@@ -47,7 +47,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
 ## Todo
-- [x] Support non-greedy inference.
+- [x] Support non-greedy inference (provably maintaining text distribution).
 - [ ] Support bs > 1.
 - [ ] Support vLLM.
 - [ ] Support more LLMs such as Mixtral 8x7B.
