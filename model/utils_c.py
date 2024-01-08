@@ -1,9 +1,12 @@
 import torch
 
+# typing
+from typing import List
+
 TOPK = 10  # topk for sparse tree
 
 
-def pad_path(path, length, pad_value=-2):
+def pad_path(path: List[int], length: int, pad_value: int = -2) -> List[int]:
     """
     Pad the given path list with a specific value up to a specified length.
 
@@ -176,7 +179,7 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     return tree_buffers
 
 
-def reset_past_key_values(passed_key_values):
+def reset_past_key_values(passed_key_values: List[torch.Tensor]) -> List[torch.Tensor]:
     """
     Resets the current lengths in the passed key-values to zero.
 

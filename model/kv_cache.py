@@ -1,5 +1,5 @@
 import torch
-
+import torch.nn as nn
 
 class KVCache:
     """
@@ -14,7 +14,7 @@ class KVCache:
         current_length (int): Current length of the data being stored.
     """
 
-    def __init__(self, data, current_length):
+    def __init__(self, data: torch.Tensor, current_length: int) -> None:
         """
         Initialize the KVCache.
 
@@ -66,7 +66,7 @@ class KVCache:
         return torch.narrow(self.data, 2, 0, self.current_length)
 
 
-def initialize_past_key_values(model):
+def initialize_past_key_values(model: nn.Module):
     """
     Initialize past key and value states for a given transformer model.
 
