@@ -771,7 +771,7 @@ class Model(nn.Module):
 
             if hasattr(self, "stable_kv") and self.stable_kv is not None:
                 kv_len=self.stable_kv[0][0].shape[2]
-                out_hidden, past_key_values = self(hidden_states[:,kv_len:], input_ids=input_ids[:,kv_len:], past_key_values=self.stable_kv,use_cache=True)
+                out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:,kv_len:], past_key_values=self.stable_kv,use_cache=True)
             else:
                 out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
             self.stable_kv=past_key_values
