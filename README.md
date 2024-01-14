@@ -46,9 +46,13 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
+## Update
+
+**2024.1.15**: We now support [batch size > 1] (#batch-size--1) generation.
+
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
-- [ ] Support bs > 1.
+- [x] Support bs > 1.
 - [ ] Support vLLM.
 - [ ] Support more LLMs such as Mixtral 8x7B.
 
@@ -126,7 +130,56 @@ output=model.tokenizer.decode(output_ids[0])
 ```
 
 **_Note: Vicuna and LLaMA2-Chat are both chat models. You need to use the correct chat template, otherwise it will cause abnormal output from the model and affect the performance of EAGLE._**
-_The current repository only supports a batch size of 1. We plan to update it in the future to support a batch size greater than 1._
+
+### Batch size > 1
+
+Switch to the *bsne1* branch.
+
+```bash
+git checkout bsne1
+```
+Here is an example. Note that left padding is needed.
+```python
+from model.ea_model import EaModel
+from fastchat.model import get_conversation_template
+
+model = EaModel.from_pretrained(
+    base_model_path=base_model_path,
+    ea_model_path=EAGLE_model_path,
+    torch_dtype=torch.float16,
+    low_cpu_mem_usage=True,
+    device_map="auto"
+)
+# left padding
+model.eval()
+model.tokenizer.padding_side = "left"
+model.tokenizer.pad_token = model.tokenizer.eos_token
+model.config.pad_token_id = model.config.eos_token_id
+
+sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
+
+your_message="Compose an engaging travel blog post about a recent trip to Hawaii, highlighting cultural experiences and must-see attractions."
+conv = get_conversation_template("llama-2-chat")
+conv.system_message = sys_p
+conv.append_message(conv.roles[0], your_message)
+conv.append_message(conv.roles[1], None)
+prompt1 = conv.get_prompt()+" "
+
+your_message="Hello"
+conv = get_conversation_template("llama-2-chat")
+conv.system_message = sys_p
+conv.append_message(conv.roles[0], your_message)
+conv.append_message(conv.roles[1], None)
+prompt2 = conv.get_prompt()+" "
+
+input_s=model.tokenizer([prompt1,prompt2],return_tensors="pt",padding=True).to("cuda")
+output_ids=model.eagenerate(input_s.input_ids,input_s.attention_mask,temperature=0.0,max_new_tokens=512,top_k=15)
+output=model.tokenizer.batch_decode(output_ids)
+print(output)
+
+# vanilla auto-regression
+# output_ids, new_token, idx=model.naivegenerate(input_s.input_ids,input_s.attention_mask,temperature=0.0,max_new_tokens=512,top_k=15,log=True)
+```
 
 ## Train
 
