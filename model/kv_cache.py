@@ -66,7 +66,7 @@ class KVCache:
         return torch.narrow(self.data, 2, 0, self.current_length)
 
 
-def initialize_past_key_values(model):
+def initialize_past_key_values(model,bs=1):
     """
     Initialize past key and value states for a given transformer model.
 
@@ -85,7 +85,7 @@ def initialize_past_key_values(model):
     # Extracting configuration from the model
     config = model.config
     # Initializing the batch size to 1, this can be modified if different batch sizes are required
-    batch_size = 1
+    batch_size = bs
     # Initializing a tensor to store past keys and values for all layers
 
     devices=[]

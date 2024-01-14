@@ -117,7 +117,7 @@ class EaModel(nn.Module):
             load_model_path=hf_hub_download(ea_model_path, "pytorch_model.bin")
         ea_layer_state_dict = torch.load(load_model_path,
                                          map_location=base_model.device)
-        model.ea_layer.load_state_dict(ea_layer_state_dict, strict=True)
+        model.ea_layer.load_state_dict(ea_layer_state_dict, strict=False)
 
         return model
 
@@ -148,15 +148,15 @@ class EaModel(nn.Module):
             if logits_processor is not None:
                 logits = orig[:, -1]
                 logits = logits_processor(None, logits)
-                probabilities = torch.nn.functional.softmax(logits, dim=1)
+                probabilities = torch.nn.functional.softmax(logits, dim=-1)
                 token = torch.multinomial(probabilities, 1)
             else:
-                token = torch.argmax(orig[:, -1])
-                token = token[None, None]
+                token = torch.argmax(orig[:, -1],dim=-1)
+                token = token[:,None]
             input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
-            ea_logits = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head, logits_processor)
+            ea_logits = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head, logits_processor,attention_mask=attention_mask)
             if output_orig:
                 return ea_logits, outputs, orig, hidden_states, token
             return ea_logits, hidden_states, token
@@ -168,25 +168,30 @@ class EaModel(nn.Module):
     def eagenerate(
             self,
             input_ids,
+            attention_mask=None,
             temperature=0.0,
             top_p=0.0,
             top_k=0.0,
             max_new_tokens=512,
             max_length=2048,
             tree_choices=mc_sim_7b_63,
+            log=False,
 
     ):
+
+        bs = input_ids.shape[0]
         if temperature > 1e-5:
             logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
         else:
             logits_processor = None
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+        #assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
         # Avoid modifying the input_ids in-place
         input_ids = input_ids.clone()
         self.ea_layer.reset_kv()
 
         if hasattr(self, "tree_choices") and self.tree_choices == tree_choices:
             tree_buffers = self.tree_buffers
+
         else:
             tree_buffers = generate_tree_buffers(
                 tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
@@ -196,8 +201,22 @@ class EaModel(nn.Module):
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
+        tree_buffers["retrieve_indices_batch"]=tree_buffers["retrieve_indices"].expand(bs,-1,-1)
+
+        bool_mask = attention_mask.bool()
+
+        #out_inputids = [ids[mask].tolist() for ids, mask in zip(input_ids, bool_mask)]
+        out_inputids = [ids.tolist() for ids, mask in zip(input_ids, bool_mask)]
+
+        #out_inputids = [[]]*bs
+        out_idx=[0]*bs
+        out_newtokens=[0]*bs
+
+        # if self.ea_layer.tree_buffer["bs"]!=bs:
+        #     self.ea_layer.init_tree(bs=bs)
+
         # Initialize the past key and value states
-        if hasattr(self, "past_key_values"):
+        if hasattr(self, "past_key_values") and self.past_key_values[0][0].shape[0]==bs:
             past_key_values = self.past_key_values
             past_key_values_data = self.past_key_values_data
             current_length_data = self.current_length_data
@@ -208,7 +227,7 @@ class EaModel(nn.Module):
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model)
+            ) = initialize_past_key_values(self.base_model,bs=bs)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
@@ -216,9 +235,10 @@ class EaModel(nn.Module):
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
         tree_logits, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
+            input_ids, self, tree_buffers["tree_attn_mask"], past_key_values, logits_processor,attention_mask=attention_mask
         )
-        new_token = 0
+        new_token = [0]*bs
+        finish_flag=[False]*bs
 
         for idx in range(max_length):
             candidates, cart_candidates_prob, tree_candidates = generate_candidates(
@@ -235,17 +255,19 @@ class EaModel(nn.Module):
                 tree_buffers["tree_position_ids"],
                 input_ids,
                 tree_buffers["retrieve_indices_head"],
+                attention_mask=attention_mask
             )
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
-                tree_candidates, tree_buffers["b_indices"]
+                tree_candidates, tree_buffers["b_indices"],finish_flag
             )
-            input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
+            input_ids, tree_logits, new_token, hidden_state, sample_token,attention_mask,newfinish_flag,new_outs = update_inference_inputs(
                 input_ids,
+                attention_mask,
                 candidates,
                 best_candidate,
                 accept_length,
-                tree_buffers["retrieve_indices"],
+                tree_buffers["retrieve_indices_batch"],
                 logits_processor,
                 logits,
                 tree_logits,
@@ -255,38 +277,60 @@ class EaModel(nn.Module):
                 self,
                 hidden_state,
                 hidden_state_new,
-                sample_p
+                sample_p,
+                finish_flag
             )
+            for batch in range(bs):
+                if not finish_flag[batch]:
+                    out_idx[batch]+=1
+                    out_newtokens[batch]=new_token[batch]
+                    out_inputids[batch].extend(new_outs[batch])
+                # if finish_flag[batch]!=newfinish_flag[batch]:
+                #     out_inputids[batch]=input_ids[batch].tolist()
+            finish_flag=newfinish_flag
 
-            if self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-                return input_ids
-            if new_token > max_new_tokens:
-                return input_ids
-            if input_ids.shape[1] > max_length:
-                return input_ids
+            if min(finish_flag):
+                break
+            if min(out_newtokens) > max_new_tokens:
+                break
+            if input_ids.shape[1]+10+len(tree_choices) > max_length:
+                break
+
+        if log:
+            return out_inputids, out_newtokens, out_idx
+        else:
+            return out_inputids
+
+
 
     @torch.no_grad()
-    def ea_generate(
+    def naivegenerate(
             self,
             input_ids,
+            attention_mask=None,
             temperature=0.0,
             top_p=0.0,
             top_k=0.0,
-            max_steps=512,
+            max_new_tokens=512,
+            max_length=2048,
             tree_choices=mc_sim_7b_63,
+            log=False,
 
     ):
+
+        bs = input_ids.shape[0]
         if temperature > 1e-5:
             logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
         else:
             logits_processor = None
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+        #assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
         # Avoid modifying the input_ids in-place
         input_ids = input_ids.clone()
         self.ea_layer.reset_kv()
 
         if hasattr(self, "tree_choices") and self.tree_choices == tree_choices:
             tree_buffers = self.tree_buffers
+
         else:
             tree_buffers = generate_tree_buffers(
                 tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
@@ -296,8 +340,21 @@ class EaModel(nn.Module):
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
+        tree_buffers["retrieve_indices_batch"]=tree_buffers["retrieve_indices"].expand(bs,-1,-1)
+
+        bool_mask = attention_mask.bool()
+
+        #out_inputids = [ids[mask].tolist() for ids, mask in zip(input_ids, bool_mask)]
+        out_inputids = [ids.tolist() for ids, mask in zip(input_ids, bool_mask)]
+        #out_inputids = [[]]*bs
+        out_idx=[0]*bs
+        out_newtokens=[0]*bs
+
+        # if self.ea_layer.tree_buffer["bs"]!=bs:
+        #     self.ea_layer.init_tree(bs=bs)
+
         # Initialize the past key and value states
-        if hasattr(self, "past_key_values"):
+        if hasattr(self, "past_key_values") and self.past_key_values[0][0].shape[0]==bs:
             past_key_values = self.past_key_values
             past_key_values_data = self.past_key_values_data
             current_length_data = self.current_length_data
@@ -308,128 +365,65 @@ class EaModel(nn.Module):
                 past_key_values,
                 past_key_values_data,
                 current_length_data,
-            ) = initialize_past_key_values(self.base_model)
+            ) = initialize_past_key_values(self.base_model,bs=bs)
             self.past_key_values = past_key_values
             self.past_key_values_data = past_key_values_data
             self.current_length_data = current_length_data
 
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
-        tree_logits, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
-        )
-        new_token = 0
 
-        for idx in range(max_steps):
-            candidates, cart_candidates_prob, tree_candidates = generate_candidates(
-                tree_logits,
-                tree_buffers["tree_indices"],
-                tree_buffers["retrieve_indices"],
-                sample_token,
-                logits_processor
-            )
-            logits, hidden_state_new, outputs = tree_decoding(
-                self,
-                tree_candidates,
-                past_key_values,
-                tree_buffers["tree_position_ids"],
-                input_ids,
-                tree_buffers["retrieve_indices_head"],
-            )
-            best_candidate, accept_length, sample_p = evaluate_posterior(
-                logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
-                tree_candidates, tree_buffers["b_indices"]
-            )
-            input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
-                input_ids,
-                candidates,
-                best_candidate,
-                accept_length,
-                tree_buffers["retrieve_indices"],
-                logits_processor,
-                logits,
-                tree_logits,
-                new_token,
-                past_key_values_data,
-                current_length_data,
-                self,
-                hidden_state,
-                hidden_state_new,
-                sample_p
-            )
 
-            yield input_ids
 
-            if self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-                break
-            if new_token > 1024:
-                break
-            if input_ids.shape[1] > 1960:
-                break
+        new_token = [0]*bs
+        finish_flag=[False]*bs
+        position_ids = attention_mask.long().cumsum(-1) - 1
+        position_ids.masked_fill_(attention_mask == 0, 1)
+        zero_num=position_ids.shape[1]-position_ids.max(dim=-1).values-1
+        zero_num=zero_num[:,None]
+        len_posi = input_ids.shape[1]
 
-    @torch.no_grad()
-    def naive_generate(
-            self,
-            input_ids,
-            temperature=0.0,
-            top_p=0.0,
-            top_k=0.0,
-            max_steps=512,
-            tree_choices=mc_sim_7b_63,
+        outputs = self.base_model(input_ids, past_key_values=past_key_values, use_cache=True,attention_mask=attention_mask,position_ids=position_ids)
 
-    ):
-        if temperature > 1e-5:
-            logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
-        else:
-            logits_processor = None
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
-        # Avoid modifying the input_ids in-place
-        input_ids = input_ids.clone()
-        self.ea_layer.reset_kv()
+        for idx in range(max_length):
 
-        if hasattr(self, "tree_choices") and self.tree_choices == tree_choices:
-            tree_buffers = self.tree_buffers
-        else:
-            tree_buffers = generate_tree_buffers(
-                tree_choices, device=self.base_model.model.layers[-1].self_attn.q_proj.weight.device
-            )
-            tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
-                self.base_model.lm_head.weight.device)
-        self.tree_buffers = tree_buffers
-        self.tree_choices = tree_choices
+            if logits_processor is not None:
+                logits = outputs.logits[:, -1]
+                logits = logits_processor(None, logits)
+                probabilities = torch.nn.functional.softmax(logits, dim=-1)
+                input_id = torch.multinomial(probabilities, 1)
+            else:
+                input_id = outputs.logits[:, -1:].argmax(dim=-1)
 
-        # Initialize the past key and value states
-        if hasattr(self, "past_key_values"):
-            past_key_values = self.past_key_values
-            past_key_values_data = self.past_key_values_data
-            current_length_data = self.current_length_data
-            # Reset the past key and value states
-            current_length_data.zero_()
-        else:
-            (
-                past_key_values,
-                past_key_values_data,
-                current_length_data,
-            ) = initialize_past_key_values(self.base_model)
-            self.past_key_values = past_key_values
-            self.past_key_values_data = past_key_values_data
-            self.current_length_data = current_length_data
-
-        input_len = input_ids.shape[1]
-        reset_tree_mode(self)
-        outputs = self.base_model(input_ids, past_key_values=past_key_values, use_cache=True)
-        new_token = 0
-
-        for idx in range(max_steps):
-            input_id = outputs.logits[:, -1:].argmax(dim=-1)
-            outputs = self.base_model(input_id, use_cache=True, past_key_values=past_key_values)
             input_ids = torch.cat([input_ids, input_id], dim=-1)
+            position_ids=torch.ones(bs,1,dtype=torch.long,device=input_ids.device)*len_posi-zero_num
+            attention_mask = torch.cat(
+                (attention_mask, torch.ones_like(input_id, device=attention_mask.device, dtype=attention_mask.dtype)),
+                dim=1)
 
-            yield input_ids
+            outputs = self.base_model(input_id, use_cache=True, past_key_values=past_key_values,attention_mask=attention_mask,position_ids=position_ids)
 
-            if self.tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
+            len_posi+=1
+
+            newfinish_flag=(input_id==self.tokenizer.eos_token_id).squeeze().tolist()
+
+            for batch in range(bs):
+                if not finish_flag[batch]:
+                    out_idx[batch]+=1
+                    out_newtokens[batch]+=1
+                    out_inputids[batch].append(input_id[batch].item())
+
+                    finish_flag[batch]=newfinish_flag[batch]
+
+            if min(finish_flag):
                 break
-            if new_token > 1024:
+            if min(out_newtokens) > max_new_tokens:
                 break
-            if input_ids.shape[1] > 1960:
+            if input_ids.shape[1]+10+len(tree_choices) > max_length:
                 break
+
+        if log:
+            return out_inputids, out_newtokens, out_idx
+        else:
+            return out_inputids
+
