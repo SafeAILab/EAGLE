@@ -48,7 +48,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 
 ## Update
 
-**2024.1.15**: We now support [batch size > 1] (#batch-size--1) generation.
+**2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
 
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
@@ -63,6 +63,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [Inference](#inference)
   - [With UI](#with-ui)
   - [With Code](#with-code)
+  - [Batch size > 1](#batch-size--1)
 - [Train](#train)
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
