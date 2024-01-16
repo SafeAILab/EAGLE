@@ -1,8 +1,8 @@
 import copy
 import random
-import time
-import torch
 
+import torch
+import time
 # TODO
 # from transformers import LlamaTokenizer
 # tokenizer=LlamaTokenizer.from_pretrained("/home/lyh/weights/hf/vicuna_v13/7B/")
@@ -17,19 +17,19 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
 )
 
-def timer(func):
-    def wrapper(*args, **kwargs):
+class Timer:
+    def __init__(self,name):
+        self.name = name
+    def __enter__(self):
         torch.cuda.synchronize()
-        start = time.perf_counter()
+        self.start = time.perf_counter()
 
-        result = func(*args, **kwargs)
 
+    def __exit__(self, exc_type, exc_value, traceback):
+        # 计算并打印经过的时间
         torch.cuda.synchronize()
-        elapsed = time.perf_counter() - start
-        print(f'{func.__name__} took {elapsed} seconds')
-        return result
-
-    return wrapper
+        elapsed = time.perf_counter() - self.start
+        print(f'{self.name} took {elapsed} seconds')
 
 def prepare_logits_processor(
         temperature=0.0, repetition_penalty=0.0, top_p=0.0, top_k=0
@@ -205,12 +205,61 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     return tree_buffers
 
 
-def initialize_tree(input_ids, model, tree_attn_mask, past_key_values, logits_processor):
-    tree_logits, outputs, logits, hidden_state, sample_token = model(
-        input_ids, past_key_values=past_key_values, output_orig=True, logits_processor=logits_processor
-    )
-    model.base_model.model.tree_mask = tree_attn_mask
-    return tree_logits, logits, hidden_state, sample_token
+def initialize_tree(input_ids, model, tree_attn_mask,  logits_processor,causal_mask):
+
+    input_pos=torch.arange(0,input_ids.shape[1],device=input_ids.device)
+    mask = causal_mask[None, None, input_pos]
+
+    logits, hidden_states = model.base_model(input_ids, input_pos,input_pos,mask)
+
+    if logits_processor is not None:
+        logits = logits[:, -1]
+        logits = logits_processor(None, logits)
+        probabilities = torch.nn.functional.softmax(logits, dim=1)
+        token = torch.multinomial(probabilities, 1)
+    else:
+        token = torch.argmax(logits[:, -1])
+        token = token[None, None]
+
+    mask_draft = causal_mask[None, None, input_pos[:-1]]
+    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1],input_pos[:-1], mask_draft)
+
+    intokens=torch.cat((input_ids,token),dim=1)
+
+    ea_logits  = model.topK_genrate(hidden_states[:,-1:], intokens, logits_processor)
+
+    model.tree_mask = tree_attn_mask
+
+    return ea_logits,logits,hidden_states,token
+
+
+def chaininitialize_tree(input_ids, model, tree_attn_mask,  logits_processor,causal_mask):
+
+    input_pos=torch.arange(0,input_ids.shape[1],device=input_ids.device)
+    mask = causal_mask[None, None, input_pos]
+
+    logits, hidden_states = model.base_model(input_ids, input_pos,input_pos,mask)
+
+    if logits_processor is not None:
+        logits = logits[:, -1]
+        logits = logits_processor(None, logits)
+        probabilities = torch.nn.functional.softmax(logits, dim=1)
+        token = torch.multinomial(probabilities, 1)
+    else:
+        token = torch.argmax(logits[:, -1])
+        token = token[None, None]
+
+    mask_draft = causal_mask[None, None, input_pos[:-1]]
+    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1],input_pos[:-1], mask_draft)
+
+    intokens=torch.cat((input_ids,token),dim=1)
+
+    ea_logits  = model.chaintopK_genrate(hidden_states[:,-1:], intokens, logits_processor)
+
+    #model.tree_mask = tree_attn_mask
+
+    return ea_logits,logits,hidden_states,token
+
 
 
 def reset_tree_mode(
@@ -273,49 +322,71 @@ def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_toke
     return cart_candidates, cart_candidates_prob, tree_candidates
 
 
+
+
+
 def tree_decoding(
         model,
         tree_candidates,
-        past_key_values,
         tree_position_ids,
         input_ids,
         retrieve_indices,
 ):
     position_ids = tree_position_ids + input_ids.shape[1]
 
-    outputs, tree_logits, hidden_state = model(
-        tree_candidates,
-        output_orig=True,
-        past_key_values=past_key_values,
-        position_ids=position_ids,
-        init=False,
-    )
+    len_pos=input_ids.shape[1]
+    mask_pos=torch.arange(len_pos,len_pos+tree_candidates.shape[1],device=tree_candidates.device)
+    tree_mask=model.tree_mask
+    model_tree_mask=model.model_tree_mask(len_pos,mask_pos,tree_mask)
+
+    # tree_candidates_base=tree_candidates.clone()
+    # position_ids_base=position_ids.clone()
+    # mask_pos_base=mask_pos.clone()
+    # model_tree_mask_base=model_tree_mask.clone()
+    #print(tree_candidates_base)
+
+    #with Timer("sbase"):
+    #print(mask_pos_base)
+    tree_logits,hidden_state=model.base_forward(tree_candidates,position_ids,mask_pos,model_tree_mask)
+
+    # tree_logits_out=tree_logits.clone()
+    # hidden_state_out=hidden_state.clone()
+
+
 
     logits = tree_logits[0, retrieve_indices]
-    return logits, hidden_state, outputs
+    return logits, hidden_state
+
+
+def chaintree_decoding(
+        model,
+        candidates,
+        input_ids,
+):
+    position_ids = input_ids.shape[1]
+
+    len_pos=input_ids.shape[1]
+    mask_pos=torch.arange(len_pos,len_pos+candidates.shape[1],device=candidates.device)
+    mask=model.causal_mask[None,None,mask_pos]
+
+
+    #with Timer("sbase"):
+    #print(mask_pos_base)
+    tree_logits,hidden_state=model.base_forward(candidates,mask_pos,mask_pos,mask)
+
+    # tree_logits_out=tree_logits.clone()
+    # hidden_state_out=hidden_state.clone()
+
+
+
+    logits = tree_logits
+    return logits, hidden_state
 
 
 def evaluate_posterior(
         logits, candidates, logits_processor, cart_candidates_prob, op, p_indices, tree_candidates, b_indices
 ):
-    """
-    Evaluate the posterior probabilities of the candidates based on the provided logits and choose the best candidate.
 
-    Depending on the temperature value, the function either uses greedy decoding or evaluates posterior
-    probabilities to select the best candidate.
-
-    Args:
-    - logits (torch.Tensor): Predicted logits of shape (batch_size, sequence_length, vocab_size).
-    - candidates (torch.Tensor): Candidate token sequences.
-    - temperature (float): Softmax temperature for probability scaling. A value of 0 indicates greedy decoding.
-    - posterior_threshold (float): Threshold for posterior probability.
-    - posterior_alpha (float): Scaling factor for the threshold.
-
-    Returns:
-    - best_candidate (torch.Tensor): Index of the chosen best candidate.
-    - accept_length (int): Length of the accepted candidate sequence.
-    """
-    # Greedy decoding based on temperature value
     if logits_processor is None:
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
@@ -385,6 +456,70 @@ def evaluate_posterior(
         return torch.tensor(best_candidate), accept_length - 1, sample_p
 
 
+def chainevaluate_posterior(
+        logits, candidates, logits_processor, cart_candidates_prob, op,
+):
+
+    if logits_processor is None:
+        # Find the tokens that match the maximum logits for each position in the sequence
+        posterior_mask = (
+                candidates[:, 1:].to(logits.device) == torch.argmax(logits[:, :-1], dim=-1)
+        ).int()
+        candidates_accept_length = (torch.cumprod(posterior_mask, dim=1)).sum(dim=1)
+        accept_length = candidates_accept_length.max()
+        # Choose the best candidate
+        best_candidate = torch.tensor(0, dtype=torch.long, device=candidates.device)
+        return best_candidate, accept_length, logits[best_candidate, accept_length]
+
+    else:
+        cart_candidates_prob = cart_candidates_prob.to(logits.device)
+        accept_length = 1
+        accept_cand = candidates[0][:1]
+        best_candidate = 0
+        # breakflag=False
+        for i in range(1, candidates.shape[1]):
+            is_eq = (candidates[:, :accept_length] == accept_cand).all(dim=1)
+            if i != accept_length:
+                # breakflag=True
+                break
+            fi = torch.nonzero(is_eq, as_tuple=True)[0][0]
+            gt_logits = logits[fi, i - 1][None]
+            gt_logits = logits_processor(None, gt_logits)[0]
+            gtp = torch.softmax(gt_logits, dim=0)
+            adjustflag = False
+            for j in range(candidates.shape[0]):
+                if is_eq[j]:
+                    r = random.random()
+                    x = candidates[j, i]
+                    if x == 0:
+                        continue
+                    px = gtp[x]
+                    qx = cart_candidates_prob[j, i]
+                    if qx <= 0:
+                        continue
+                    acp = px / qx
+                    if r <= acp:
+                        accept_cand = torch.cat((accept_cand, x[None]), dim=0)
+                        accept_length += 1
+                        best_candidate = j
+                        break
+                    else:
+                        q = op[i - 1][0].clone()
+                        gtp = gtp - q
+                        gtp[gtp < 0] = 0
+                        gtp = gtp / gtp.sum()
+                        # has_nan = torch.isnan(gtp).any()
+                        # if has_nan:
+                        #     print(1)
+                        adjustflag = True
+        if adjustflag:
+            sample_p = gtp
+        else:
+            gt_logits = logits[best_candidate, accept_length - 1]
+            sample_p = torch.softmax(gt_logits, dim=0)
+        return torch.tensor(best_candidate), accept_length - 1, sample_p
+
+
 @torch.no_grad()
 def update_inference_inputs(
         input_ids,
@@ -396,7 +531,7 @@ def update_inference_inputs(
         logits,
         tree_logits,
         new_token,
-        past_key_values_data_list,
+        past_key_values_data,
         current_length_data,
         model,
         hidden_state,
@@ -414,15 +549,18 @@ def update_inference_inputs(
     )
     # Update the past key values based on the selected tokens
     # Source tensor that contains relevant past information based on the selected candidate
-    for past_key_values_data in past_key_values_data_list:
-        tgt = past_key_values_data[..., select_indices.to(past_key_values_data.device), :]
-        # Destination tensor where the relevant past information will be stored
-        dst = past_key_values_data[..., prev_input_len: prev_input_len + tgt.shape[-2], :]
-        # Copy relevant past information from the source to the destination
-        dst.copy_(tgt, non_blocking=True)
+    # for past_key_values_data in past_key_values_data_list:
+    tgt = past_key_values_data[..., select_indices.to(past_key_values_data.device), :]
+    # Destination tensor where the relevant past information will be stored
+    dst = past_key_values_data[..., prev_input_len: prev_input_len + tgt.shape[-2], :]
+    # Copy relevant past information from the source to the destination
+    dst.copy_(tgt, non_blocking=True)
+
+    # print(prev_input_len)
+    # print(model.base_model.layers[0].attention.kv_cache.k_cache[0,0,prev_input_len])
 
     # Update the current length tensor (currently only support batch size is 1)
-    current_length_data.fill_(prev_input_len + tgt.shape[-2])
+    #current_length_data=prev_input_len + tgt.shape[-2]
 
     retrieve_hidden_state_new = hidden_state_new[:, retrieve_indices]
     accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length + 1]
@@ -436,9 +574,47 @@ def update_inference_inputs(
         token = torch.argmax(prob)
         token = token[None, None]
     #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
-    tree_logits = model.ea_layer.topK_genrate(accept_hidden_state_new,
-                                              input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
-                                              head=model.base_model.lm_head, logits_processor=logits_processor)
+    ea_input=torch.cat((input_ids, token.to(input_ids.device)), dim=1)
+    tree_logits = model.topK_genrate(accept_hidden_state_new,ea_input,logits_processor)
+
+    new_token += accept_length + 1
+
+    return input_ids, tree_logits, new_token, None, token
+
+
+
+def chainupdate_inference_inputs(
+        input_ids,
+        candidates,
+        accept_length,
+        logits_processor,
+        new_token,
+        model,
+        hidden_state_new,
+        sample_p
+):
+    prev_input_len = input_ids.shape[1]
+    # Map the best candidate indices to the original indices in the sequence
+
+    # Append the tokens from the best candidate to the input sequence
+    input_ids = torch.cat(
+        [input_ids, candidates[:, : accept_length + 1].to(input_ids.device)], dim=-1
+    )
+    accept_hidden_state_new = hidden_state_new[:, : accept_length + 1]
+    # token=model.base_model.lm_head(accept_hidden_state_new[:,-1]).argmax()
+    # token=token[None,None]
+    prob = sample_p
+    if logits_processor is not None:
+        token = torch.multinomial(prob, 1)
+        token = token[None]
+    else:
+        token = torch.argmax(prob)
+        token = token[None, None]
+    #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    ea_input=torch.cat((input_ids, token.to(input_ids.device)), dim=1)
+    tree_logits = model.chaintopK_genrate(accept_hidden_state_new,ea_input,logits_processor)
+    #print(model.base_model.layers[0].attention.kv_cache.k_cache[0, 0, prev_input_len])
+
 
     new_token += accept_length + 1
 

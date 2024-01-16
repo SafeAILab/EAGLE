@@ -6,7 +6,8 @@ python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fa
 import argparse
 import json
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 import time
 
 import shortuuid
@@ -20,91 +21,10 @@ from model.utils import *
 from model.choices import *
 
 
-def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
-    assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
-    # Avoid modifying the input_ids in-place
-    input_ids = input_ids.clone()
-    model.ea_layer.reset_kv()
-
-    if hasattr(model, "tree_choices") and model.tree_choices == tree_choices:
-        tree_buffers = model.tree_buffers
-    else:
-        tree_buffers = generate_tree_buffers(
-            tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
-        )
-        tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
-            model.base_model.lm_head.weight.device)
-    model.tree_buffers = tree_buffers
-    model.tree_choices = tree_choices
-
-    # Initialize the past key and value states
-    if hasattr(model, "past_key_values"):
-        past_key_values = model.past_key_values
-        past_key_values_data = model.past_key_values_data
-        current_length_data = model.current_length_data
-        # Reset the past key and value states
-        current_length_data.zero_()
-    else:
-        (
-            past_key_values,
-            past_key_values_data,
-            current_length_data,
-        ) = initialize_past_key_values(model.base_model)
-        model.past_key_values = past_key_values
-        model.past_key_values_data = past_key_values_data
-        model.current_length_data = current_length_data
-
-    input_len = input_ids.shape[1]
-    reset_tree_mode(model)
-    tree_logits, logits, hidden_state, sample_token = initialize_tree(
-        input_ids, model, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
-    )
-    new_token = 0
-
-    for idx in range(max_steps):
-        candidates, cart_candidates_prob, tree_candidates = generate_candidates(
-            tree_logits,
-            tree_buffers["tree_indices"],
-            tree_buffers["retrieve_indices"],
-            sample_token,
-            logits_processor
-        )
-        logits, hidden_state_new, outputs = tree_decoding(
-            model,
-            tree_candidates,
-            past_key_values,
-            tree_buffers["tree_position_ids"],
-            input_ids,
-            tree_buffers["retrieve_indices_head"],
-        )
-        best_candidate, accept_length, sample_p = evaluate_posterior(
-            logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
-            tree_candidates, tree_buffers["b_indices"]
-        )
-        input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
-            input_ids,
-            candidates,
-            best_candidate,
-            accept_length,
-            tree_buffers["retrieve_indices"],
-            logits_processor,
-            logits,
-            tree_logits,
-            new_token,
-            past_key_values_data,
-            current_length_data,
-            model,
-            hidden_state,
-            hidden_state_new,
-            sample_p
-        )
-        if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-            break
-        if new_token > 1024:
-            break
-        if input_ids.shape[1] > 1960:
-            break
-    return input_ids, new_token, idx
+torch._inductor.config.coordinate_descent_tuning = True
+torch._inductor.config.triton.unique_kernel_names = True
+torch._inductor.config.fx_graph_cache = True # Experimental feature to reduce compilation times, will be on by default in future
+torch._dynamo.config.cache_size_limit=64
 
 
 def run_eval(
@@ -191,6 +111,12 @@ def get_model_answers(
 
     tokenizer = model.get_tokenizer()
 
+
+    model.draft_one = torch.compile(model.draft_one, mode="reduce-overhead", fullgraph=True,dynamic=False)
+    # model.draft_many = torch.compile(model.draft_many, mode="reduce-overhead", fullgraph=True,dynamic=True)
+    model.base_forward = torch.compile(model.base_forward, mode="reduce-overhead", fullgraph=True)
+    model.base_forward_one = torch.compile(model.base_forward_one, mode="reduce-overhead", fullgraph=True)
+
     if temperature > 1e-5:
         logits_processor = prepare_logits_processor(temperature=temperature)
     else:
@@ -226,12 +152,10 @@ def get_model_answers(
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = ea_forward(
+            output_ids, new_token, idx = model.chaineagenerate(
                 torch.as_tensor(input_ids).cuda(),
-                model,
-                tokenizer,
-                tree_choices,
-                logits_processor,
+                temperature=temperature,
+                log=True
             )
             torch.cuda.synchronize()
             total_time = time.time() - start_time
@@ -294,13 +218,14 @@ def get_model_answers(
                 try:
                     torch.cuda.synchronize()
                     start_time = time.time()
-                    output_ids, new_token, idx = ea_forward(
+                    #from torch._dynamo.utils import CompileProfiler
+                    # with CompileProfiler() as prof:
+                    output_ids, new_token, idx = model.chaineagenerate(
                         torch.as_tensor(input_ids).cuda(),
-                        model,
-                        tokenizer,
-                        tree_choices,
-                        logits_processor,
+                        temperature=temperature,
+                        log=True
                     )
+                    #print(prof.report())
                     torch.cuda.synchronize()
                     total_time = time.time() - start_time
                     output_ids = output_ids[0][len(input_ids[0]):]
@@ -374,15 +299,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="down_checkpoints/LC70B",
+        default="/home/lyh/weights/hf/eagle/llama2chat/7B/model_int4.g32.pth",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/70B/",
+    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/7B/model_int4.g32.pth",
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"
     )
-    parser.add_argument("--model-id", type=str, default="ess-llama-2-chat-70b-fp16")
+    parser.add_argument("--model-id", type=str, default="fast_final")
     parser.add_argument(
         "--bench-name",
         type=str,
@@ -428,7 +353,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=0.0,
     )
 
     parser.add_argument(
