@@ -8,7 +8,7 @@ eagle-llm"><b>Blog</b></a> |
 
 <p align="center">
   <a href="">
-    <img src="https://img.shields.io/badge/Version-v1.0.0-orange.svg" alt="Version">
+    <img src="https://img.shields.io/badge/Version-v1.1.0-orange.svg" alt="Version">
   </a>
   <a href="https://opensource.org/licenses/Apache-2.0">
     <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
@@ -46,9 +46,16 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
+## Update
+
+**2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
+
+**2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
+
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
-- [ ] Support bs > 1.
+- [x] Support bs > 1.
+- [x] Support gpt-fast.
 - [ ] Support vLLM.
 - [ ] Support more LLMs such as Mixtral 8x7B.
 
@@ -59,10 +66,15 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [Inference](#inference)
   - [With UI](#with-ui)
   - [With Code](#with-code)
+  - [Batch size > 1](#batch-size--1)
 - [Train](#train)
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
 - [Evaluation](#evaluation)
+- [With gpt-fast](#with-gpt-fast)
+  - [Setup](#setup)
+  - [Quantizing Weights](quantizing-weights)
+  - [Modifying Path](modifying-path)
 
 ## Setup & Installation
 
@@ -126,7 +138,56 @@ output=model.tokenizer.decode(output_ids[0])
 ```
 
 **_Note: Vicuna and LLaMA2-Chat are both chat models. You need to use the correct chat template, otherwise it will cause abnormal output from the model and affect the performance of EAGLE._**
-_The current repository only supports a batch size of 1. We plan to update it in the future to support a batch size greater than 1._
+
+### Batch size > 1
+
+Switch to the *bsne1* branch.
+
+```bash
+git checkout bsne1
+```
+Here is an example. Note that left padding is needed.
+```python
+from model.ea_model import EaModel
+from fastchat.model import get_conversation_template
+
+model = EaModel.from_pretrained(
+    base_model_path=base_model_path,
+    ea_model_path=EAGLE_model_path,
+    torch_dtype=torch.float16,
+    low_cpu_mem_usage=True,
+    device_map="auto"
+)
+# left padding
+model.eval()
+model.tokenizer.padding_side = "left"
+model.tokenizer.pad_token = model.tokenizer.eos_token
+model.config.pad_token_id = model.config.eos_token_id
+
+sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
+
+your_message="Compose an engaging travel blog post about a recent trip to Hawaii, highlighting cultural experiences and must-see attractions."
+conv = get_conversation_template("llama-2-chat")
+conv.system_message = sys_p
+conv.append_message(conv.roles[0], your_message)
+conv.append_message(conv.roles[1], None)
+prompt1 = conv.get_prompt()+" "
+
+your_message="Hello"
+conv = get_conversation_template("llama-2-chat")
+conv.system_message = sys_p
+conv.append_message(conv.roles[0], your_message)
+conv.append_message(conv.roles[1], None)
+prompt2 = conv.get_prompt()+" "
+
+input_s=model.tokenizer([prompt1,prompt2],return_tensors="pt",padding=True).to("cuda")
+output_ids=model.eagenerate(input_s.input_ids,input_s.attention_mask,temperature=0.0,max_new_tokens=512,top_k=15)
+output=model.tokenizer.batch_decode(output_ids)
+print(output)
+
+# vanilla auto-regression
+# output_ids, new_token, idx=model.naivegenerate(input_s.input_ids,input_s.attention_mask,temperature=0.0,max_new_tokens=512,top_k=15,log=True)
+```
 
 ## Train
 
@@ -156,6 +217,57 @@ python -m evaluation.gen_baseline_answer_vicuna\
 		 --base-model-path [path of the original model]\
 ```
 The above two commands will each generate a .jsonl file that records the generation results and wall time. Then, you can use evaluation/speed.py to calculate the ratio of speeds.
+
+## With gpt-fast
+
+GPT-Fast primarily accelerates generation through quantization and compilation, which we have integrated into EAGLE. In tests on MT-bench with LLaMA2-Chat 13B, using fp16 precision, EAGLE+gpt-fast is 2.15x faster than gpt-fast. With int4 quantization, EAGLE+gpt-fast is 1.74x faster.
+
+| Precision 	    | fp16      | int4      |
+|-------------------|-----------|-----------|
+| gpt-fast          | 33.2      | 47.4      |
+| EAGLE+gpt-fast    | 71.5 (2.15x)    | 82.5 (1.74x)     |
+
+
+
+<p align="center">
+  <img src="./figs/eaglefast.gif" alt="demogif">
+</p>
+
+_Inference is conducted on a single A100 GPU at int4 precision using the llama2-chat 13B model. No additional training required._
+
+In EAGLE, using GPT-Fast only requires three steps: setting up the environment, quantizing weights, and modifying the model path.
+
+### Setup
+
+Switch to the *eaglefast* branch.
+
+```bash
+git checkout eaglefast
+```
+
+Install the Preview (Nightly) version of PyTorch with CUDA 12.1, do not use "pip install torch" as it installs the Stable version, which lacks some of the new features used by gpt-fast. 
+
+_This is a requirement for gpt-fast, whereas other branches of eagle can use the Stable version of PyTorch._
+
+### Quantizing Weights
+
+Convert Huggingface weights to the format required by gpt-fast.
+
+```bash
+python convert/convert_hf_checkpoint.py --checkpoint_dir path_of_base_model
+python convert/convert_hf_checkpoint_EAGLE.py --checkpoint_dir path_of_eagle
+```
+
+Quantize weights.
+
+```bash
+python -m model.quantize_llama --checkpoint_path path_of_base_model/model.pth
+python -m model.quantize_EAGLE --checkpoint_path path_of_eagle/model.pth
+```
+
+### Modifying Path
+
+When specifying the model weights (including the base model and EAGLE), change "path" to "path/model_int4.g32.pth".
 
 ## Acknowledgements
 
