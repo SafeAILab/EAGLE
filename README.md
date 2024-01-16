@@ -235,7 +235,7 @@ GPT-Fast primarily accelerates generation through quantization and compilation, 
 
 _Inference is conducted on a single A100 GPU at int4 precision using the llama2-chat 13B model. No additional training required._
 
-In EAGLE, using GPT-Fast only requires three steps: setting up the environment, quantizing weights, and modifying the model path.
+In EAGLE, using gpt-fast only requires three steps: setting up the environment, quantizing weights, and modifying the model path.
 
 ### Setup
 
