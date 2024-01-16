@@ -71,6 +71,10 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
 - [Evaluation](#evaluation)
+- [With gpt-fast](#with-gpt-fast)
+  - [Setup](#setup)
+  - [Quantizing Weights](quantizing-weights)
+  - [Modifying Path](modifying-path)
 
 ## Setup & Installation
 
@@ -254,7 +258,7 @@ python convert/convert_hf_checkpoint.py --checkpoint_dir path_of_base_model
 python convert/convert_hf_checkpoint_EAGLE.py --checkpoint_dir path_of_eagle
 ```
 
-Quantize the weights.
+Quantize weights.
 
 ```bash
 python -m model.quantize_llama --checkpoint_path path_of_base_model/model.pth
