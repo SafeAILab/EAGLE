@@ -50,9 +50,12 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 
 **2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
 
+**2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
+
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
 - [x] Support bs > 1.
+- [x] Support gpt-fast.
 - [ ] Support vLLM.
 - [ ] Support more LLMs such as Mixtral 8x7B.
 
