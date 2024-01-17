@@ -53,12 +53,15 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 
 **2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
 
+**2024.1.17**: We now support  [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
+
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
 - [x] Support bs > 1.
 - [x] Support gpt-fast.
+- [x] Support more LLMs such as Mixtral 8x7B.
 - [ ] Support vLLM.
-- [ ] Support more LLMs such as Mixtral 8x7B.
+
 
 ## Contents
 
