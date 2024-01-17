@@ -22,65 +22,10 @@ from model.kv_cache import initialize_past_key_values
 from model.choices import *
 
 
-
-def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
-    assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
-    # Avoid modifying the input_ids in-place
-    input_ids = input_ids.clone()
-    model.ea_layer.reset_kv()
-
-    if hasattr(model, "tree_choices") and model.tree_choices == tree_choices:
-        tree_buffers = model.tree_buffers
-    else:
-        tree_buffers = generate_tree_buffers(
-            tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
-        )
-        tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
-            model.base_model.lm_head.weight.device)
-    model.tree_buffers = tree_buffers
-    model.tree_choices = tree_choices
-
-    # Initialize the past key and value states
-    if hasattr(model, "past_key_values"):
-        past_key_values = model.past_key_values
-        past_key_values_data = model.past_key_values_data
-        current_length_data = model.current_length_data
-        # Reset the past key and value states
-        current_length_data.zero_()
-    else:
-        (
-            past_key_values,
-            past_key_values_data,
-            current_length_data,
-        ) = initialize_past_key_values(model.base_model)
-        model.past_key_values = past_key_values
-        model.past_key_values_data = past_key_values_data
-        model.current_length_data = current_length_data
-
-    input_len = input_ids.shape[1]
-    reset_tree_mode(model)
-
-    outputs = model.base_model(input_ids, past_key_values=past_key_values, use_cache=True)
-    new_token = 0
-
-    for idx in range(max_steps):
-        if logits_processor is not None:
-            logits = outputs.logits[:, -1]
-            logits = logits_processor(None, logits)
-            probabilities = torch.nn.functional.softmax(logits, dim=-1)
-            input_id = torch.multinomial(probabilities, 1)
-        else:
-            input_id = outputs.logits[:, -1:].argmax(dim=-1)
-        outputs = model.base_model(input_id, use_cache=True, past_key_values=past_key_values)
-        input_ids = torch.cat([input_ids, input_id], dim=-1)
-
-        if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-            break
-        if new_token > 1024:
-            break
-        if input_ids.shape[1] > 1960:
-            break
-    return input_ids, new_token, idx
+torch._inductor.config.coordinate_descent_tuning = True
+torch._inductor.config.triton.unique_kernel_names = True
+torch._inductor.config.fx_graph_cache = True # Experimental feature to reduce compilation times, will be on by default in future
+torch._dynamo.config.cache_size_limit=64
 
 
 def run_eval(
@@ -167,6 +112,12 @@ def get_model_answers(
 
     tokenizer = model.get_tokenizer()
 
+
+    model.draft_one = torch.compile(model.draft_one, mode="reduce-overhead", fullgraph=True, dynamic=False)
+    model.draft_many = torch.compile(model.draft_many, mode="reduce-overhead", fullgraph=True)
+    model.base_forward = torch.compile(model.base_forward, mode="reduce-overhead", fullgraph=True, dynamic=False)
+    model.base_forward_one = torch.compile(model.base_forward_one, mode="reduce-overhead", fullgraph=True)
+
     if temperature > 1e-5:
         logits_processor = prepare_logits_processor(temperature=temperature)
     else:
@@ -199,12 +150,10 @@ def get_model_answers(
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = ea_forward(
+            output_ids, new_token, idx = model.naivegenerate(
                 torch.as_tensor(input_ids).cuda(),
-                model,
-                tokenizer,
-                tree_choices,
-                logits_processor,
+                temperature=temperature,
+                log=True
             )
             torch.cuda.synchronize()
             total_time = time.time() - start_time
@@ -237,7 +186,6 @@ def get_model_answers(
             if conv.name == "xgen" and output.startswith("Assistant:"):
                 output = output.replace("Assistant:", "", 1).strip()
 
-
             turns.append(output)
             idxs.append(int(idx))
             new_tokens.append(int(new_token))
@@ -266,12 +214,10 @@ def get_model_answers(
                 try:
                     torch.cuda.synchronize()
                     start_time = time.time()
-                    output_ids, new_token, idx = ea_forward(
+                    output_ids, new_token, idx = model.naivegenerate(
                         torch.as_tensor(input_ids).cuda(),
-                        model,
-                        tokenizer,
-                        tree_choices,
-                        logits_processor,
+                        temperature=temperature,
+                        log=True
                     )
                     torch.cuda.synchronize()
                     total_time = time.time() - start_time
@@ -400,7 +346,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=0.0,
     )
 
     parser.add_argument(
