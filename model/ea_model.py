@@ -1,9 +1,12 @@
 import copy
+import json
+import time
 
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, PretrainedConfig
+from transformers import PreTrainedModel, PretrainedConfig,AutoConfig
 from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
+from .modeling_Mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .choices import mc_sim_7b_63
@@ -15,36 +18,6 @@ from .configs import EConfig
 from huggingface_hub import hf_hub_download
 
 
-class ResBlock(nn.Module):
-    """
-    A Residual Block module.
-
-    This module performs a linear transformation followed by a SiLU activation,
-    and then adds the result to the original input, creating a residual connection.
-
-    Args:
-        hidden_size (int): The size of the hidden layers in the block.
-    """
-
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.linear = nn.Linear(hidden_size, hidden_size)
-        # Initialize as an identity mapping
-        torch.nn.init.zeros_(self.linear.weight)
-        # Use SiLU activation to keep consistent with the Llama model
-        self.act = nn.SiLU()
-
-    def forward(self, x):
-        """
-        Forward pass of the ResBlock.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Output after the residual connection and activation.
-        """
-        return x + self.act(self.linear(x))
 
 
 class EaModel(nn.Module):
@@ -64,7 +37,13 @@ class EaModel(nn.Module):
         self.base_model_name_or_path = base_model_name_or_path
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path)
         config = EConfig.from_pretrained(ea_model_path)
-        self.ea_layer = Model(config)
+        with open(ea_model_path,"r") as f:
+            con=json.loads(f.read())
+        try:
+            bias=con["bias"]
+        except:
+            bias=False
+        self.ea_layer = Model(config,bias=bias)
 
         low_memory=False
 
@@ -95,14 +74,21 @@ class EaModel(nn.Module):
     @classmethod
     def from_pretrained(
             cls,
+            Type="LLaMA",
             base_model_path=None,
             ea_model_path=None,
             **kwargs,
     ):
-
-        base_model = KVLlamaForCausalLM.from_pretrained(
-            base_model_path, **kwargs
-        )
+        #assert Type=="LLaMA" or "Mixtral"
+        Type=AutoConfig.from_pretrained(base_model_path).architectures[0]
+        if Type=='LlamaForCausalLM':
+            base_model = KVLlamaForCausalLM.from_pretrained(
+                base_model_path, **kwargs
+            )
+        else:
+            base_model = KVMixtralForCausalLM.from_pretrained(
+                base_model_path, **kwargs
+            )
 
         configpath=os.path.join(ea_model_path,"config.json")
         if not os.path.exists(configpath):
@@ -180,7 +166,7 @@ class EaModel(nn.Module):
             logits_processor = prepare_logits_processor(temperature=temperature, top_p=top_p, top_k=top_k)
         else:
             logits_processor = None
-        assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
+        #assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
         # Avoid modifying the input_ids in-place
         input_ids = input_ids.clone()
         self.ea_layer.reset_kv()
@@ -336,10 +322,12 @@ class EaModel(nn.Module):
                 input_ids,
                 tree_buffers["retrieve_indices_head"],
             )
+
             best_candidate, accept_length, sample_p = evaluate_posterior(
                 logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
                 tree_candidates, tree_buffers["b_indices"]
             )
+            #print("post", time.time() - s)
             input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
                 input_ids,
                 candidates,
