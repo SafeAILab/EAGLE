@@ -229,6 +229,7 @@ GPT-Fast primarily accelerates generation through quantization and compilation, 
 
 | Precision 	    | fp16      | int4      |
 |-------------------|-----------|-----------|
+| vanilla          | 24.5 tokens/s     | N/A     |
 | gpt-fast          | 55.1 tokens/s      | 106.9 tokens/s     |
 | EAGLE+gpt-fast    | 100.2 tokens/s    | 160.4 tokens/s    |
 
