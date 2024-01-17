@@ -452,7 +452,7 @@ def len_list(x,n):
     return [i for i in x if len(i)<=n]
 
 class Model(nn.Module):
-    def __init__(self,config,load_emb=False,path=None):
+    def __init__(self,config,load_emb=False,path=None,bias=True):
         super().__init__()
 
 
@@ -461,6 +461,7 @@ class Model(nn.Module):
         self.gradient_checkpointing = True
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         if load_emb:
@@ -488,7 +489,7 @@ class Model(nn.Module):
         #self.init_tree()
 
         self.layers = nn.ModuleList([LlamaDecoderLayer(config,index) for index in range(config.num_hidden_layers)])
-        self.fc=nn.Linear(2*config.hidden_size,config.hidden_size)
+        self.fc=nn.Linear(2*config.hidden_size,config.hidden_size,bias=bias)
         self.act=ACT2FN[config.hidden_act]
         for param in self.embed_tokens.parameters():
             param.requires_grad = False

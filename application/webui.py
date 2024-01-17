@@ -1,7 +1,7 @@
 import os
 import time
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 import gradio as gr
 import argparse
 from model.ea_model import EaModel
@@ -77,6 +77,10 @@ def warmup(model):
     if args.model_type == "llama-2-chat":
         sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
         conv.system_message = sys_p
+    elif args.model_type == "mixtral":
+        conv = get_conversation_template("llama-2-chat")
+        conv.system_message = ''
+        conv.sep2 = "</s>"
     conv.append_message(conv.roles[0], "Hello")
     conv.append_message(conv.roles[1], None)
     prompt = conv.get_prompt()
@@ -97,6 +101,10 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
     if args.model_type == "llama-2-chat":
         sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
         conv.system_message = sys_p
+    elif args.model_type == "mixtral":
+        conv = get_conversation_template("llama-2-chat")
+        conv.system_message = ''
+        conv.sep2 = "</s>"
 
     for query, response in pure_history:
         conv.append_message(conv.roles[0], query)
@@ -205,7 +213,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--ea-model-path",
     type=str,
-    default="lc2",
+    default="/home/lyh/weights/hf/eagle/llama2chat/7B/",
     help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
 )
 parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/7B/",
@@ -216,7 +224,7 @@ parser.add_argument(
 parser.add_argument(
     "--load-in-4bit", action="store_true", help="Use 4-bit quantization"
 )
-parser.add_argument("--model-type", type=str, default="llama-2-chat", help="llama-2-chat or vicuna, for chat template")
+parser.add_argument("--model-type", type=str, default="llama-2-chat",choices=["llama-2-chat","vicuna","mixtral"], help="llama-2-chat or vicuna, for chat template")
 parser.add_argument(
     "--max-new-token",
     type=int,
