@@ -53,12 +53,15 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 
 **2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
 
+**2024.1.17**: We now support  [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
+
 ## Todo
 - [x] Support non-greedy inference (provably maintaining text distribution).
 - [x] Support bs > 1.
 - [x] Support gpt-fast.
+- [x] Support more LLMs such as Mixtral 8x7B.
 - [ ] Support vLLM.
-- [ ] Support more LLMs such as Mixtral 8x7B.
+
 
 ## Contents
 
@@ -87,9 +90,10 @@ pip install -r requirements.txt
 
 | Base Model  | EAGLE on Hugging Face  | \# EAGLE Parameters | Base Model  | EAGLE on Hugging Face  | \# EAGLE Parameters |
 |------|------|------|------|------|------|
-| Vicuna 7B | [yuhuili/EAGLE-Vicuna-7B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-7B-v1.3) | 0.24B | LLaMA2-Chat 7B | [yuhuili/EAGLE-llama2-chat-7B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-7B) | 0.24B |
-| Vicuna 13B | [yuhuili/EAGLE-Vicuna-13B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-13B-v1.3) | 0.37B | LLaMA2-Chat 13B | [yuhuili/EAGLE-llama2-chat-13B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-13B) | 0.37B |
-| Vicuna 33B | [yuhuili/EAGLE-Vicuna-33B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-33B-v1.3)| 0.56B | LLaMA2-Chat 70B| [yuhuili/EAGLE-llama2-chat-70B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-70B)| 0.99B |
+| Vicuna-7B-v1.3 | [yuhuili/EAGLE-Vicuna-7B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-7B-v1.3) | 0.24B | LLaMA2-Chat 7B | [yuhuili/EAGLE-llama2-chat-7B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-7B) | 0.24B |
+| Vicuna-13B-v1.3 | [yuhuili/EAGLE-Vicuna-13B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-13B-v1.3) | 0.37B | LLaMA2-Chat 13B | [yuhuili/EAGLE-llama2-chat-13B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-13B) | 0.37B |
+| Vicuna-33B-v1.3 | [yuhuili/EAGLE-Vicuna-33B-v1.3](https://huggingface.co/yuhuili/EAGLE-Vicuna-33B-v1.3)| 0.56B | LLaMA2-Chat 70B| [yuhuili/EAGLE-llama2-chat-70B](https://huggingface.co/yuhuili/EAGLE-llama2-chat-70B)| 0.99B |
+| Mixtral-8x7B-Instruct-v0.1 | [yuhuili/EAGLE-mixtral-instruct-8x7B](https://huggingface.co/yuhuili/EAGLE-mixtral-instruct-8x7B)| 0.28B |
 
 
 ## Inference
@@ -221,12 +225,12 @@ The above two commands will each generate a .jsonl file that records the generat
 
 ## With gpt-fast
 
-GPT-Fast primarily accelerates generation through quantization and compilation, which we have integrated into EAGLE. In tests on MT-bench with LLaMA2-Chat 13B, using fp16 precision, EAGLE+gpt-fast is 2.15x faster than gpt-fast. With int4 quantization, EAGLE+gpt-fast is 1.74x faster.
+GPT-Fast primarily accelerates generation through quantization and compilation, which we have integrated into EAGLE. Here is the result of an experiment conducted on MT-bench with a single RTX3090, using LLaMA2-chat 7B.
 
 | Precision 	    | fp16      | int4      |
 |-------------------|-----------|-----------|
-| gpt-fast          | 33.2 tokens/s      | 47.4 tokens/s     |
-| EAGLE+gpt-fast    | 71.5 tokens/s (2.15x)    | 82.5 tokens/s (1.74x)     |
+| gpt-fast          | 55.1 tokens/s      | 106.9 tokens/s     |
+| EAGLE+gpt-fast    | 100.2 tokens/s    | 160.4 tokens/s    |
 
 
 
@@ -234,7 +238,7 @@ GPT-Fast primarily accelerates generation through quantization and compilation, 
   <img src="./figs/eaglefast.gif" alt="demogif">
 </p>
 
-_Inference is conducted on a single A100 GPU at int4 precision using the LLaMA2-chat 13B model. No additional training required._
+_Inference is conducted on a single RTX3090 GPU at int4 precision using the LLaMA2-chat 7B model. No additional training required._
 
 In EAGLE, using gpt-fast only requires three steps: setting up the environment, quantizing weights, and modifying the model path.
 
