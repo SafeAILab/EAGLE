@@ -152,7 +152,7 @@ def get_model_answers(
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = model.chaineagenerate(
+            output_ids, new_token, idx = model.eagenerate(
                 torch.as_tensor(input_ids).cuda(),
                 temperature=temperature,
                 log=True
@@ -220,7 +220,7 @@ def get_model_answers(
                     start_time = time.time()
                     #from torch._dynamo.utils import CompileProfiler
                     # with CompileProfiler() as prof:
-                    output_ids, new_token, idx = model.chaineagenerate(
+                    output_ids, new_token, idx = model.eagenerate(
                         torch.as_tensor(input_ids).cuda(),
                         temperature=temperature,
                         log=True

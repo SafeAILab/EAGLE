@@ -205,40 +205,13 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     return tree_buffers
 
 
-def initialize_tree(input_ids, model, tree_attn_mask,  logits_processor,causal_mask):
-
-    input_pos=torch.arange(0,input_ids.shape[1],device=input_ids.device)
-    mask = causal_mask[None, None, input_pos]
-
-    logits, hidden_states = model.base_model(input_ids, input_pos,input_pos,mask)
-
-    if logits_processor is not None:
-        logits = logits[:, -1]
-        logits = logits_processor(None, logits)
-        probabilities = torch.nn.functional.softmax(logits, dim=1)
-        token = torch.multinomial(probabilities, 1)
-    else:
-        token = torch.argmax(logits[:, -1])
-        token = token[None, None]
-
-    mask_draft = causal_mask[None, None, input_pos[:-1]]
-    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1],input_pos[:-1], mask_draft)
-
-    intokens=torch.cat((input_ids,token),dim=1)
-
-    ea_logits  = model.topK_genrate(hidden_states[:,-1:], intokens, logits_processor)
-
-    model.tree_mask = tree_attn_mask
-
-    return ea_logits,logits,hidden_states,token
-
 
 def chaininitialize_tree(input_ids, model, tree_attn_mask,  logits_processor,causal_mask):
 
     input_pos=torch.arange(0,input_ids.shape[1],device=input_ids.device)
-    mask = causal_mask[None, None, input_pos]
 
-    logits, hidden_states = model.base_model(input_ids, input_pos,input_pos,mask)
+
+    logits, hidden_states = model.base_model(input_ids, input_pos)
 
     if logits_processor is not None:
         logits = logits[:, -1]
@@ -249,14 +222,14 @@ def chaininitialize_tree(input_ids, model, tree_attn_mask,  logits_processor,cau
         token = torch.argmax(logits[:, -1])
         token = token[None, None]
 
-    mask_draft = causal_mask[None, None, input_pos[:-1]]
-    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1],input_pos[:-1], mask_draft)
+
+    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1])
 
     intokens=torch.cat((input_ids,token),dim=1)
 
     ea_logits  = model.chaintopK_genrate(hidden_states[:,-1:], intokens, logits_processor)
 
-    #model.tree_mask = tree_attn_mask
+
 
     return ea_logits,logits,hidden_states,token
 
@@ -363,16 +336,17 @@ def chaintree_decoding(
         candidates,
         input_ids,
 ):
-    position_ids = input_ids.shape[1]
+
 
     len_pos=input_ids.shape[1]
     mask_pos=torch.arange(len_pos,len_pos+candidates.shape[1],device=candidates.device)
-    mask=model.causal_mask[None,None,mask_pos]
+
 
 
     #with Timer("sbase"):
     #print(mask_pos_base)
-    tree_logits,hidden_state=model.base_forward(candidates,mask_pos,mask_pos,mask)
+    with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
+        tree_logits,hidden_state=model.base_forward(candidates,mask_pos)
 
     # tree_logits_out=tree_logits.clone()
     # hidden_state_out=hidden_state.clone()

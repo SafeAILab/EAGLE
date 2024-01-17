@@ -110,13 +110,13 @@ transformer_configs = {
 }
 
 class KVCache(nn.Module):
-    def __init__(self, kdata,vdata):
+    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16):
         super().__init__()
-        # cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
-        # self.register_buffer('k_cache', torch.zeros(cache_shape, dtype=dtype))
-        # self.register_buffer('v_cache', torch.zeros(cache_shape, dtype=dtype))
-        self.k_cache=kdata
-        self.v_cache=vdata
+        cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+        self.register_buffer('k_cache', torch.zeros(cache_shape, dtype=dtype))
+        self.register_buffer('v_cache', torch.zeros(cache_shape, dtype=dtype))
+        # self.k_cache=torch.zeros(cache_shape, dtype=dtype)
+        # self.v_cache=torch.zeros(cache_shape, dtype=dtype)
 
     def update(self, input_pos, k_val, v_val):
         # input_pos: [S], k_val: [B, H, S, D]
@@ -144,48 +144,26 @@ class Transformer(nn.Module):
         self.max_batch_size = -1
         self.max_seq_length = -1
 
-    def setup_caches(self, max_batch_size, max_seq_length,device="cuda"):
-        # if self.max_seq_length >= max_seq_length and self.max_batch_size >= max_batch_size:
-        #     return
+    def setup_caches(self, max_batch_size, max_seq_length):
+
         head_dim = self.config.dim // self.config.n_head
         max_seq_length = find_multiple(max_seq_length, 8)
         self.max_seq_length = max_seq_length
         self.max_batch_size = max_batch_size
-
-        past_key_values_data = torch.zeros(
-            self.config.n_layer * 2,
-            1,
-            self.config.n_head,
-            max_seq_length,
-            self.config.dim // self.config.n_head,
-            device=device,
-            dtype=torch.bfloat16,
-        )
-
-        past_key_values = [] * self.config.n_layer
-        for i in range(self.config.n_layer):
-            past_key_values.append(
-                KVCache(past_key_values_data[i * 2 + 0], past_key_values_data[i * 2 + 1])
-            )
-
-
-
-        for ib,b in enumerate(self.layers):
-            b.attention.kv_cache = past_key_values[ib]
+        for b in self.layers:
+            b.attention.kv_cache = KVCache(max_batch_size, max_seq_length, self.config.n_local_heads, head_dim)
 
         self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base)
-        self.freqs_cis=self.freqs_cis.to(device)
-        return past_key_values_data
-        #self.causal_mask = torch.tril(torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool))
+        self.causal_mask = torch.tril(torch.ones(self.max_seq_length, self.max_seq_length, dtype=torch.bool))
 
-    def forward(self, idx: Tensor, input_pos:torch.Tensor,attn_pos:torch.Tensor,mask:torch.Tensor) -> Tuple[Tensor,Tensor]:
+    def forward(self, idx: Tensor, input_pos: Optional[Tensor] = None) -> Tuple[Tensor,Tensor]:
         assert self.freqs_cis is not None, "Caches must be initialized first"
-        #mask = self.causal_mask[None, None, input_pos]
+        mask = self.causal_mask[None, None, input_pos]
         freqs_cis = self.freqs_cis[input_pos]
         x = self.tok_embeddings(idx)
 
         for i, layer in enumerate(self.layers):
-            x = layer(x, attn_pos, freqs_cis, mask)
+            x = layer(x, input_pos, freqs_cis, mask)
         x = self.norm(x)
         logits = self.output(x)
         return logits,x
