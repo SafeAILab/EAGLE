@@ -42,7 +42,7 @@ class EaModel(nn.Module):
         try:
             bias=con["bias"]
         except:
-            bias=False
+            bias=True
         self.ea_layer = Model(config,bias=bias)
 
         low_memory=False
