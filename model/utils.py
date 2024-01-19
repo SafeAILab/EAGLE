@@ -193,8 +193,10 @@ def generate_tree_buffers(tree_choices, device="cuda"):
 
 
 def initialize_tree(input_ids, model, tree_attn_mask, past_key_values, logits_processor,attention_mask=None):
+    position_ids = attention_mask.long().cumsum(-1) - 1
+    position_ids.masked_fill_(attention_mask == 0, 1)
     tree_logits, outputs, logits, hidden_state, sample_token = model(
-        input_ids, past_key_values=past_key_values, output_orig=True, logits_processor=logits_processor,attention_mask=attention_mask
+        input_ids, past_key_values=past_key_values, output_orig=True, logits_processor=logits_processor,attention_mask=attention_mask,position_ids=position_ids
     )
     model.base_model.model.tree_mask = tree_attn_mask
     return tree_logits, logits, hidden_state, sample_token
@@ -563,6 +565,9 @@ def update_inference_inputs(
     #     # Update the current length tensor (currently only support batch size is 1)
     # # current_length_data.fill_(prev_input_len + tgt.shape[-2])
     current_length_data.fill_(prev_input_len + max_acccept_len + 1)
+
+    if prev_input_len + max_acccept_len + 1>2000 or current_length_data[0].item()>2000:
+        print(1)
 
     # draft_hidden=torch.stack(hidden_list)
     # input_ids=torch.stack(input_ids_list)
