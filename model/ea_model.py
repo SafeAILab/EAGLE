@@ -280,18 +280,20 @@ class EaModel(nn.Module):
                 sample_p,
                 finish_flag
             )
+            min_uf_newtokens=max_length+10
             for batch in range(bs):
                 if not finish_flag[batch]:
                     out_idx[batch]+=1
                     out_newtokens[batch]=new_token[batch]
                     out_inputids[batch].extend(new_outs[batch])
+                    min_uf_newtokens=min(min_uf_newtokens,new_token[batch])
                 # if finish_flag[batch]!=newfinish_flag[batch]:
                 #     out_inputids[batch]=input_ids[batch].tolist()
             finish_flag=newfinish_flag
 
             if min(finish_flag):
                 break
-            if min(out_newtokens) > max_new_tokens:
+            if min(out_newtokens) > min_uf_newtokens:
                 break
             if input_ids.shape[1]+10+len(tree_choices) > max_length:
                 break
