@@ -745,6 +745,7 @@ class Model(nn.Module):
         input_ids = input_ids.to(hidden_states.device)
         position_ids = attention_mask.long().cumsum(-1) - 1
         position_ids.masked_fill_(attention_mask == 0, 1)
+        position_ids=position_ids.to(self.device)
         zero_num=position_ids.shape[1]-position_ids.max(dim=-1).values-1
         zero_num=zero_num[:,None]
         ss_token, ss_prob, ss_op = [], [], []
