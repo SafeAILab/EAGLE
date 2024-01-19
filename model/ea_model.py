@@ -15,6 +15,8 @@ from .configs import EConfig
 from huggingface_hub import hf_hub_download
 
 
+
+
 class EaModel(nn.Module):
 
     def __init__(
@@ -50,6 +52,7 @@ class EaModel(nn.Module):
         else:
             self.ea_layer.diff_device = False
         self.ea_layer.to(self.base_model.dtype).to(device)
+        self.ea_layer.device=device
         self.ea_layer.init_tree()
 
     def get_tokenizer(self):
@@ -166,6 +169,7 @@ class EaModel(nn.Module):
             )
             tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
                 self.base_model.lm_head.weight.device)
+            tree_buffers["tree_position_ids"]=tree_buffers["tree_position_ids"].to(self.base_model.device)
         self.tree_buffers = tree_buffers
         self.tree_choices = tree_choices
 
@@ -377,17 +381,19 @@ class EaModel(nn.Module):
 
             newfinish_flag=(input_id==self.tokenizer.eos_token_id).squeeze().tolist()
 
+            min_uf_newtokens = max_length + 10
             for batch in range(bs):
                 if not finish_flag[batch]:
                     out_idx[batch]+=1
                     out_newtokens[batch]+=1
                     out_inputids[batch].append(input_id[batch].item())
-
+                    min_uf_newtokens = min(min_uf_newtokens, new_token[batch])
                     finish_flag[batch]=newfinish_flag[batch]
+
 
             if min(finish_flag):
                 break
-            if min(out_newtokens) > max_new_tokens:
+            if min_uf_newtokens > max_new_tokens:
                 break
             if input_ids.shape[1]+10+len(tree_choices) > max_length:
                 break
