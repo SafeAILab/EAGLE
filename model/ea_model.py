@@ -15,38 +15,6 @@ from .configs import EConfig
 from huggingface_hub import hf_hub_download
 
 
-class ResBlock(nn.Module):
-    """
-    A Residual Block module.
-
-    This module performs a linear transformation followed by a SiLU activation,
-    and then adds the result to the original input, creating a residual connection.
-
-    Args:
-        hidden_size (int): The size of the hidden layers in the block.
-    """
-
-    def __init__(self, hidden_size):
-        super().__init__()
-        self.linear = nn.Linear(hidden_size, hidden_size)
-        # Initialize as an identity mapping
-        torch.nn.init.zeros_(self.linear.weight)
-        # Use SiLU activation to keep consistent with the Llama model
-        self.act = nn.SiLU()
-
-    def forward(self, x):
-        """
-        Forward pass of the ResBlock.
-
-        Args:
-            x (torch.Tensor): Input tensor.
-
-        Returns:
-            torch.Tensor: Output after the residual connection and activation.
-        """
-        return x + self.act(self.linear(x))
-
-
 class EaModel(nn.Module):
 
     def __init__(
@@ -293,7 +261,7 @@ class EaModel(nn.Module):
 
             if min(finish_flag):
                 break
-            if min(out_newtokens) > min_uf_newtokens:
+            if min_uf_newtokens > max_new_tokens:
                 break
             if input_ids.shape[1]+10+len(tree_choices) > max_length:
                 break
