@@ -457,8 +457,9 @@ def update_inference_inputs(
 
     ab=tuple(range(bs))
     select_indices = (
-            retrieve_indices[ab,best_candidate, : max_acccept_len + 1,...] + prev_input_len
+            retrieve_indices.cpu()[ab,best_candidate, : max_acccept_len + 1,...] + prev_input_len
     )
+    #select_indices=select_indices.cpu()
     new_input_ids=candidates[ab, best_candidate, : max_acccept_len + 1,...]
 
     draft_hidden = retrieve_hidden_state_new[ab, best_candidate, :max_acccept_len + 1]
@@ -493,7 +494,7 @@ def update_inference_inputs(
         # Copy relevant past information from the source to the destination
         dst.copy_(tgt, non_blocking=True)
 
-    input_ids=torch.cat((input_ids,new_input_ids),dim=1)
+    input_ids=torch.cat((input_ids,new_input_ids.to(input_ids.device)),dim=1)
 
 
     # input_ids_list=[]
@@ -582,7 +583,7 @@ def update_inference_inputs(
         token = torch.argmax(prob,dim=-1)
         token = token[:,None]
 
-    draft_input_ids=torch.cat((new_input_ids, torch.ones(bs, 1, dtype=torch.long, device=input_ids.device)),dim=1)
+    draft_input_ids=torch.cat((new_input_ids, torch.ones(bs, 1, dtype=torch.long, device=new_input_ids.device)),dim=1)
     token_=token[:,0]
     new_ind=prev_input_len+torch.tensor(accept_length,dtype=torch.long)+1
     draft_input_ids[ab,torch.tensor(accept_length,dtype=torch.long)+1]=token_
