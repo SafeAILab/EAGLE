@@ -13,7 +13,7 @@ from huggingface_hub import hf_hub_download
 from .cnets import Model
 from .configs import EConfig
 from huggingface_hub import hf_hub_download
-
+import time
 
 
 
@@ -149,6 +149,9 @@ class EaModel(nn.Module):
             log=False,
 
     ):
+        if log:
+            torch.cuda.synchronize()
+            start_time = time.time()
 
         bs = input_ids.shape[0]
         if temperature > 1e-5:
@@ -210,6 +213,7 @@ class EaModel(nn.Module):
             input_ids, self, tree_buffers["tree_attn_mask"], past_key_values, logits_processor,attention_mask=attention_mask
         )
         new_token = [0]*bs
+        wall_times = [0]*bs
         finish_flag=[False]*bs
 
         for idx in range(max_length):
@@ -259,7 +263,10 @@ class EaModel(nn.Module):
                     out_newtokens[batch]=new_token[batch]
                     out_inputids[batch].extend(new_outs[batch])
                     min_uf_newtokens=min(min_uf_newtokens,new_token[batch])
-                # if finish_flag[batch]!=newfinish_flag[batch]:
+                if log:
+                    if finish_flag[batch]!=newfinish_flag[batch]:
+                        torch.cuda.synchronize()
+                        wall_times[batch]=time.time()-start_time
                 #     out_inputids[batch]=input_ids[batch].tolist()
             finish_flag=newfinish_flag
 
@@ -271,7 +278,11 @@ class EaModel(nn.Module):
                 break
 
         if log:
-            return out_inputids, out_newtokens, out_idx
+            torch.cuda.synchronize()
+            for batch in range(bs):
+                if not finish_flag[batch]:
+                    wall_times[batch] = time.time() - start_time
+            return out_inputids, out_newtokens, out_idx,wall_times
         else:
             return out_inputids
 
@@ -291,6 +302,9 @@ class EaModel(nn.Module):
             log=False,
 
     ):
+        if log:
+            torch.cuda.synchronize()
+            start_time = time.time()
 
         bs = input_ids.shape[0]
         if temperature > 1e-5:
@@ -322,6 +336,7 @@ class EaModel(nn.Module):
         out_inputids = [ids.tolist() for ids, mask in zip(input_ids, bool_mask)]
         #out_inputids = [[]]*bs
         out_idx=[0]*bs
+        wall_times = [0] * bs
         out_newtokens=[0]*bs
 
         # if self.ea_layer.tree_buffer["bs"]!=bs:
@@ -387,8 +402,16 @@ class EaModel(nn.Module):
                     out_idx[batch]+=1
                     out_newtokens[batch]+=1
                     out_inputids[batch].append(input_id[batch].item())
-                    min_uf_newtokens = min(min_uf_newtokens, new_token[batch])
-                    finish_flag[batch]=newfinish_flag[batch]
+                    min_uf_newtokens = min(min_uf_newtokens, out_newtokens[batch])
+
+                    if log:
+                        if finish_flag[batch] != newfinish_flag[batch]:
+                            torch.cuda.synchronize()
+                            wall_times[batch] = time.time() - start_time
+
+            for batch in range(bs):
+                if not finish_flag[batch]:
+                    finish_flag[batch] = newfinish_flag[batch]
 
 
             if min(finish_flag):
@@ -399,7 +422,11 @@ class EaModel(nn.Module):
                 break
 
         if log:
-            return out_inputids, out_newtokens, out_idx
+            torch.cuda.synchronize()
+            for batch in range(bs):
+                if not finish_flag[batch]:
+                    wall_times[batch] = time.time() - start_time
+            return out_inputids, out_newtokens, out_idx,wall_times
         else:
             return out_inputids
 
