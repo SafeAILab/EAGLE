@@ -20,94 +20,11 @@ from model.utils import *
 from model.choices import *
 
 
-def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
-    assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
-    # Avoid modifying the input_ids in-place
-    input_ids = input_ids.clone()
-    model.ea_layer.reset_kv()
 
-    if hasattr(model, "tree_choices") and model.tree_choices == tree_choices:
-        tree_buffers = model.tree_buffers
-    else:
-        tree_buffers = generate_tree_buffers(
-            tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
-        )
-        tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
-            model.base_model.lm_head.weight.device)
-    model.tree_buffers = tree_buffers
-    model.tree_choices = tree_choices
-
-    # Initialize the past key and value states
-    if hasattr(model, "past_key_values"):
-        past_key_values = model.past_key_values
-        past_key_values_data = model.past_key_values_data
-        current_length_data = model.current_length_data
-        # Reset the past key and value states
-        current_length_data.zero_()
-    else:
-        (
-            past_key_values,
-            past_key_values_data,
-            current_length_data,
-        ) = initialize_past_key_values(model.base_model)
-        model.past_key_values = past_key_values
-        model.past_key_values_data = past_key_values_data
-        model.current_length_data = current_length_data
-
-    input_len = input_ids.shape[1]
-    reset_tree_mode(model)
-    tree_logits, logits, hidden_state, sample_token = initialize_tree(
-        input_ids, model, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
-    )
-    new_token = 0
-
-    for idx in range(max_steps):
-        candidates, cart_candidates_prob, tree_candidates = generate_candidates(
-            tree_logits,
-            tree_buffers["tree_indices"],
-            tree_buffers["retrieve_indices"],
-            sample_token,
-            logits_processor
-        )
-        logits, hidden_state_new, outputs = tree_decoding(
-            model,
-            tree_candidates,
-            past_key_values,
-            tree_buffers["tree_position_ids"],
-            input_ids,
-            tree_buffers["retrieve_indices_head"],
-        )
-        best_candidate, accept_length, sample_p = evaluate_posterior(
-            logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
-            tree_candidates, tree_buffers["b_indices"]
-        )
-        input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
-            input_ids,
-            candidates,
-            best_candidate,
-            accept_length,
-            tree_buffers["retrieve_indices"],
-            logits_processor,
-            logits,
-            tree_logits,
-            new_token,
-            past_key_values_data,
-            current_length_data,
-            model,
-            hidden_state,
-            hidden_state_new,
-            sample_p
-        )
-        if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
-            break
-        if new_token > 1024:
-            break
-        if input_ids.shape[1] > 1960:
-            break
-    return input_ids, new_token, idx
 
 
 def run_eval(
+        bs,
         base_model_path,
         ea_model_path,
         model_id,
@@ -134,18 +51,15 @@ def run_eval(
     assert num_gpus_total % num_gpus_per_model == 0
     use_ray = num_gpus_total // num_gpus_per_model > 1
 
-    if use_ray:
-        get_answers_func = ray.remote(num_gpus=num_gpus_per_model)(
-            get_model_answers
-        ).remote
-    else:
-        get_answers_func = get_model_answers
+
+    get_answers_func = get_model_answers
 
     chunk_size = len(questions) // (num_gpus_total // num_gpus_per_model)  # // 2
     ans_handles = []
     for i in range(0, len(questions), chunk_size):
         ans_handles.append(
             get_answers_func(
+                bs,
                 base_model_path,
                 ea_model_path,
                 model_id,
@@ -160,12 +74,122 @@ def run_eval(
             )
         )
 
-    if use_ray:
-        ray.get(ans_handles)
+
+def batchgenerate(
+        questions,
+        model,
+        temperature,
+        model_id,
+        num_choice=3,
+        save=False,
+):
+    tokenizer=model.tokenizer
+    bs = len(questions)
+    choices_l = [[] for _ in range(bs)]
+    for i in range(num_choice):
+        torch.manual_seed(i)
+
+        conv_l=[]
+        turns_l=[[] for _ in range(bs)]
+        idxs_l=[[] for _ in range(bs)]
+        new_tokens_l=[[] for _ in range(bs)]
+        wall_time_l=[[] for _ in range(bs)]
+        for b in range(bs):
+            conv = get_conversation_template("llama-2-chat")
+            sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
+            conv.system_message = sys_p
+            conv_l.append(conv)
+
+
+        for j in range(len(questions[0]["turns"])):
+            prompts=[]
+            for b in range(bs):
+                question=questions[b]
+                conv = conv_l[b]
+
+
+                qs = question["turns"][j]
+                conv.append_message(conv.roles[0], qs)
+                conv.append_message(conv.roles[1], None)
+                prompt = conv.get_prompt() + " "
+                prompts.append(prompt)
+
+            input_s = tokenizer(prompts, return_tensors="pt", padding=True).to("cuda")
+
+            torch.cuda.synchronize()
+            start_time = time.time()
+
+            output_ids_l, new_token_l, idx_l, times_l = model.eagenerate(input_s.input_ids, input_s.attention_mask, temperature=temperature,log=True)
+
+            torch.cuda.synchronize()
+            total_time = time.time() - start_time
+
+            for b in range(bs):
+                output_ids, new_token, idx=output_ids_l[b],new_token_l[b],idx_l[b]
+                conv=conv_l[b]
+
+                output_ids = output_ids[len(input_s.input_ids[0]):]
+
+
+                if conv.stop_token_ids:
+                    stop_token_ids_index = [
+                        i
+                        for i, id in enumerate(output_ids)
+                        if id in conv.stop_token_ids
+                    ]
+                    if len(stop_token_ids_index) > 0:
+                        output_ids = output_ids[: stop_token_ids_index[0]]
+
+                output = tokenizer.decode(
+                    output_ids,
+                    spaces_between_special_tokens=False,
+                )
+
+
+                conv.stop_str = "</s>"
+                if conv.stop_str and output.find(conv.stop_str) > 0:
+                    output = output[: output.find(conv.stop_str)]
+                for special_token in tokenizer.special_tokens_map.values():
+                    if isinstance(special_token, list):
+                        for special_tok in special_token:
+                            output = output.replace(special_tok, "")
+                    else:
+                        output = output.replace(special_token, "")
+                output = output.strip()
+
+                if conv.name == "xgen" and output.startswith("Assistant:"):
+                    output = output.replace("Assistant:", "", 1).strip()
+
+                turns_l[b].append(output)
+                idxs_l[b].append(int(idx))
+                new_tokens_l[b].append(int(new_token))
+                wall_time_l[b].append(times_l[b])
+                conv.messages[-1][-1] = output
+        if save:
+            for b in range(bs):
+                choices_l[b].append({"index": i, "turns": turns_l[b], "idxs": idxs_l[b], "new_tokens": new_tokens_l[b], "wall_time": wall_time_l[b]})
+
+    if save:
+        for b in range(bs):
+            os.makedirs(os.path.dirname(answer_file), exist_ok=True)
+            with open(os.path.expanduser(answer_file), "a") as fout:
+                ans_json = {
+                    "question_id": questions[b]["question_id"],
+                    "answer_id": shortuuid.uuid(),
+                    "model_id": model_id,
+                    "choices": choices_l[b],
+                    "tstamp": time.time(),
+                }
+                fout.write(json.dumps(ans_json) + "\n")
+
+
+
+
 
 
 @torch.inference_mode()
 def get_model_answers(
+        bs,
         base_model_path,
         ea_model_path,
         model_id,
@@ -189,12 +213,12 @@ def get_model_answers(
         device_map="auto"
     )
 
-    tokenizer = model.get_tokenizer()
+    model.tokenizer.padding_side = "left"
+    model.tokenizer.pad_token = model.tokenizer.eos_token
+    model.config.pad_token_id = model.config.eos_token_id
 
-    if temperature > 1e-5:
-        logits_processor = prepare_logits_processor(temperature=temperature)
-    else:
-        logits_processor = None
+
+
 
     model.eval()
     print('Check model training state:', model.training)
@@ -202,157 +226,40 @@ def get_model_answers(
     cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
     print('CUDA VISIBLE DEVICES:', cuda_visible_devices)
 
-    question = questions[0]
+    #warmup
 
-    # warmup
-    for _ in range(3):
-        torch.manual_seed(0)
-
-        conv = get_conversation_template("llama-2-chat")
-        sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
-        conv.system_message = sys_p
-        turns = []
-        idxs = []
-        new_tokens = []
-        wall_time = []
-        for j in range(len(question["turns"])):
-            qs = question["turns"][j]
-            conv.append_message(conv.roles[0], qs)
-            conv.append_message(conv.roles[1], None)
-            prompt = conv.get_prompt() + " "
-            input_ids = tokenizer([prompt]).input_ids
-
-            # try:
-            torch.cuda.synchronize()
-            start_time = time.time()
-
-            output_ids, new_token, idx = ea_forward(
-                torch.as_tensor(input_ids).cuda(),
+    question_l=[]
+    for question in questions:
+        question_l.append(question)
+        if len(question_l)==bs:
+            batchgenerate(
+                question_l,
                 model,
-                tokenizer,
-                tree_choices,
-                logits_processor,
+                temperature,
+                model_id,
             )
-            torch.cuda.synchronize()
-            total_time = time.time() - start_time
-            output_ids = output_ids[0][len(input_ids[0]):]
-            # be consistent with the template's stop_token_ids
-            if conv.stop_token_ids:
-                stop_token_ids_index = [
-                    i
-                    for i, id in enumerate(output_ids)
-                    if id in conv.stop_token_ids
-                ]
-                if len(stop_token_ids_index) > 0:
-                    output_ids = output_ids[: stop_token_ids_index[0]]
+            break
 
-            output = tokenizer.decode(
-                output_ids,
-                spaces_between_special_tokens=False,
-            )
-            conv.stop_str = "</s>"
-            if conv.stop_str and output.find(conv.stop_str) > 0:
-                output = output[: output.find(conv.stop_str)]
-            for special_token in tokenizer.special_tokens_map.values():
-                if isinstance(special_token, list):
-                    for special_tok in special_token:
-                        output = output.replace(special_tok, "")
-                else:
-                    output = output.replace(special_token, "")
-            output = output.strip()
-
-            if conv.name == "xgen" and output.startswith("Assistant:"):
-                output = output.replace("Assistant:", "", 1).strip()
-
-            turns.append(output)
-            idxs.append(int(idx))
-            new_tokens.append(int(new_token))
-            wall_time.append(total_time)
-            conv.messages[-1][-1] = output
     print('Warmup done')
 
     # questions=questions[6:]
+    question_l = []
     for question in tqdm(questions):
 
-        choices = []
-        for i in range(num_choices):
-            torch.manual_seed(i)
-            conv = get_conversation_template("llama-2-chat")
-            sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
-            conv.system_message = sys_p
-            turns = []
-            idxs = []
-            new_tokens = []
-            wall_time = []
-            for j in range(len(question["turns"])):
-                qs = question["turns"][j]
-                conv.append_message(conv.roles[0], qs)
-                conv.append_message(conv.roles[1], None)
-                prompt = conv.get_prompt() + " "
-                input_ids = tokenizer([prompt]).input_ids
+        question_l.append(question)
+        if len(question_l) == bs:
+            batchgenerate(
+                question_l,
+                model,
+                temperature,
+                model_id,
+                save=True,
+                num_choice=num_choices,
 
-                try:
-                    torch.cuda.synchronize()
-                    start_time = time.time()
-                    output_ids, new_token, idx = ea_forward(
-                        torch.as_tensor(input_ids).cuda(),
-                        model,
-                        tokenizer,
-                        tree_choices,
-                        logits_processor,
-                    )
-                    torch.cuda.synchronize()
-                    total_time = time.time() - start_time
-                    output_ids = output_ids[0][len(input_ids[0]):]
+            )
+            question_l=[]
 
-                    if conv.stop_token_ids:
-                        stop_token_ids_index = [
-                            i
-                            for i, id in enumerate(output_ids)
-                            if id in conv.stop_token_ids
-                        ]
-                        if len(stop_token_ids_index) > 0:
-                            output_ids = output_ids[: stop_token_ids_index[0]]
 
-                    output = tokenizer.decode(
-                        output_ids,
-                        spaces_between_special_tokens=False,
-                    )
-                    if conv.stop_str and output.find(conv.stop_str) > 0:
-                        output = output[: output.find(conv.stop_str)]
-                    for special_token in tokenizer.special_tokens_map.values():
-                        if isinstance(special_token, list):
-                            for special_tok in special_token:
-                                output = output.replace(special_tok, "")
-                        else:
-                            output = output.replace(special_token, "")
-                    output = output.strip()
-
-                    if conv.name == "xgen" and output.startswith("Assistant:"):
-                        output = output.replace("Assistant:", "", 1).strip()
-                except RuntimeError as e:
-                    print("ERROR question ID: ", question["question_id"])
-                    output = "ERROR"
-
-                turns.append(output)
-                idxs.append(int(idx))
-                new_tokens.append(int(new_token))
-                wall_time.append(total_time)
-                conv.messages[-1][-1] = output
-            # torch.cuda.empty_cache()
-            choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time})
-
-        # Dump answers
-        os.makedirs(os.path.dirname(answer_file), exist_ok=True)
-        with open(os.path.expanduser(answer_file), "a") as fout:
-            ans_json = {
-                "question_id": question["question_id"],
-                "answer_id": shortuuid.uuid(),
-                "model_id": model_id,
-                "choices": choices,
-                "tstamp": time.time(),
-            }
-            fout.write(json.dumps(ans_json) + "\n")
 
 
 def reorg_answer_file(answer_file):
@@ -374,10 +281,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="down_checkpoints/LC70B",
+        default="/root/eagle/7B",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/70B/",
+    parser.add_argument("--base-model-path", type=str, default="/root/7B",
+                        help="1")
+    parser.add_argument("--bs", type=int, default=2,
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"
@@ -428,7 +337,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--temperature",
         type=float,
-        default=1.0,
+        default=0.0,
     )
 
     parser.add_argument(
@@ -439,7 +348,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    args.model_id = args.model_id + "-temperature-" + str(args.temperature)
+    args.model_id = args.model_id + "-temperature-" + str(args.temperature)+"-bs-"+str(args.bs)
     args.tree_choices = eval(args.tree_choices)
     if args.num_gpus_total // args.num_gpus_per_model > 1:
         import ray
@@ -455,6 +364,7 @@ if __name__ == "__main__":
     print(f"Output to {answer_file}")
 
     run_eval(
+        args.bs,
         args.base_model_path,
         args.ea_model_path,
         args.model_id,
