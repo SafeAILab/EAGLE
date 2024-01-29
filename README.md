@@ -48,6 +48,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
 ## Update
+**2023.12.8**: EAGLE v1.0 is released.
 
 **2024.1.15**: We now support [batch size > 1](#batch-size--1) generation.
 
