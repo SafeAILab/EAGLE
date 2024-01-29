@@ -5,7 +5,7 @@ parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/vicuna
 parser.add_argument('--configpath', type=str, default="config.json")
 parser.add_argument('--lr', type=float, default=3e-5)
 parser.add_argument('--bs', type=int, default=4)
-parser.add_argument('--gradient-accumulation-steps', type=int, default=8)
+parser.add_argument('--gradient-accumulation-steps', type=int, default=1)
 parser.add_argument('--tmpdir', type=str, default='0')
 parser.add_argument('--outdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
@@ -349,60 +349,30 @@ for epoch in range(num_epochs + 1):
     num_batches = 0
     model.train()
     for batch_idx, data in enumerate(tqdm(train_loader)):
-        # if 330<batch_idx<360:
-        #     continue
-        # optimizer.zero_grad()
-        # predict = model(data["hidden_states"],input_ids=data["input_ids"],attention_mask=data["attention_mask"])
-        # with torch.no_grad():
-        #     target_head=head(data["target"])
-        #     target_p = nn.Softmax(dim=2)(target_head)
-        #     target_p=target_p.detach()
-        # out_head=model.head(predict)
-        # out_logp=nn.LogSoftmax(dim=2)(out_head)
-        # loss_mask=data["loss_mask"][:,:,None]
-        # plogp=target_p*out_logp
-        # ploss=-torch.sum(torch.sum(loss_mask * plogp, 2))/loss_mask.sum()
-        # vloss = criterion(predict, data["target"])
-        # vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
-        #
-        # # out_head_clone=out_head.clone().detach()
-        # # out_logp_clone = nn.LogSoftmax(dim=2)(out_head_clone)
-        # # plogp_clone = target_p * out_logp_clone
-        # # ploss_head = -torch.sum(torch.sum(loss_mask * plogp_clone, 2)) / loss_mask.sum()
-        #
-        # loss=train_config["v_w"]*vloss+train_config["p_w"]*ploss+train_config["head_w"]
-        # #loss.backward()
-        # accelerator.backward(loss)
-        # optimizer.step()
 
-        optimizer.zero_grad()
-        predict = model(data["hidden_states"], input_ids=data["input_ids"], attention_mask=data["attention_mask"])
-        with torch.no_grad():
-            target_head = head(data["target"])
-            target_p = nn.Softmax(dim=2)(target_head)
-            target_p = target_p.detach()
-        out_head = head(predict)
-        out_logp = nn.LogSoftmax(dim=2)(out_head)
-        loss_mask = data["loss_mask"][:, :, None]
-        plogp = target_p * out_logp
-        ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-        vloss = criterion(predict, data["target"])
-        vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
-        loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
-        # loss.backward()
-        accelerator.backward(loss)
-        accelerator.clip_grad_value_(model.parameters(), train_config["grad_clip"])
-        optimizer.step()
+        with accelerator.accumulate(model):
+            optimizer.zero_grad()
+            predict = model(data["hidden_states"], input_ids=data["input_ids"], attention_mask=data["attention_mask"])
+            with torch.no_grad():
+                target_head = head(data["target"])
+                target_p = nn.Softmax(dim=2)(target_head)
+                target_p = target_p.detach()
+            out_head = head(predict)
+            out_logp = nn.LogSoftmax(dim=2)(out_head)
+            loss_mask = data["loss_mask"][:, :, None]
+            plogp = target_p * out_logp
+            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
+            vloss = criterion(predict, data["target"])
+            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
+            loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
+            # loss.backward()
+            accelerator.backward(loss)
+            accelerator.clip_grad_value_(model.parameters(), train_config["grad_clip"])
+            optimizer.step()
+            if is_warmup:
+                scheduler.step()
 
-        if loss != loss and accelerator.is_main_process:
-            print(f"nan, Epoch {epoch}, batch id {batch_idx}")
-            with open('nan.txt', 'w') as f:
-                f.write(f"nan, Epoch {epoch}, batch id {batch_idx}")
-                torch.save(data, 'nandata.ckpt')
-            exit()
-
-        if is_warmup:
-            scheduler.step()
+        
 
         with torch.no_grad():
             _, predicted = torch.max(out_head, 2)
