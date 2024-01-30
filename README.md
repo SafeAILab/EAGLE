@@ -1,4 +1,4 @@
-<img src="figs/logo.png" alt="EAGLE" width="220" align="left"><div align="center"><h1>&nbsp;EAGLE: Lossless Acceleration of LLM Decoding by Feature Extrapolation</h1></div>
+<img src="figs/logo.png" alt="EAGLE" width="220" align="left"><div align="center"><h1>&nbsp;EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty</h1></div>
 
 <p align="center">
 | <a href="https://arxiv.org/pdf/2401.15077.pdf"><b>Paper</b></a> | <a href="https://sites.google.com/view/
@@ -275,6 +275,17 @@ python -m model.quantize_EAGLE --checkpoint_path path_of_eagle/model.pth
 ### Modifying Path
 
 When specifying the model weights (including the base model and EAGLE), change "path" to "path/model_int4.g32.pth".
+
+## Reference
+For technical details and full experimental results, please check [the paper](https://arxiv.org/pdf/2401.15077.pdf).
+```
+@inproceedings{li2024eagle, 
+	author = {Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang}, 
+	title = {EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty}, 
+	journal={arXiv preprint arXiv:2401.15077},
+	year = {2024}
+}
+```
 
 ## Acknowledgements
 
