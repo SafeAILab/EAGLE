@@ -1,7 +1,6 @@
 import os
 import time
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 import gradio as gr
 import argparse
 from model.ea_model import EaModel
