@@ -279,10 +279,10 @@ When specifying the model weights (including the base model and EAGLE), change "
 ## Reference
 For technical details and full experimental results, please check [the paper](https://arxiv.org/pdf/2401.15077.pdf).
 ```
-@inproceedings{li2024eagle, 
+@article{li2024eagle, 
 	author = {Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang}, 
 	title = {EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty}, 
-	journal={arXiv preprint arXiv:2401.15077},
+	journal = {arXiv preprint arXiv:2401.15077},
 	year = {2024}
 }
 ```
