@@ -42,15 +42,16 @@ def prepare_logits_processor(
         top_k: int = 0
 ) -> LogitsProcessorList:
     processor_list = LogitsProcessorList()
-    if temperature >= 1e-5 and temperature != 1.0:
-        processor_list.append(TemperatureLogitsWarper(temperature))
-    if repetition_penalty > 1.0:
-        processor_list.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
-    if 1e-8 <= top_p < 1.0:
-        processor_list.append(TopPLogitsWarper(top_p))
-    if top_k > 0:
-        processor_list.append(TopKLogitsWarper(top_k))
-    return processor_list
+    if temperature>1e-5:
+        if temperature >= 1e-5 and temperature != 1.0:
+            processor_list.append(TemperatureLogitsWarper(temperature))
+        if repetition_penalty > 1.0:
+            processor_list.append(RepetitionPenaltyLogitsProcessor(repetition_penalty))
+        if 1e-8 <= top_p < 1.0:
+            processor_list.append(TopPLogitsWarper(top_p))
+        if top_k > 0:
+            processor_list.append(TopKLogitsWarper(top_k))
+        return processor_list
 
 
 # test_processor = prepare_logits_processor(
