@@ -1,9 +1,10 @@
 import copy
 import random
 
+
 # typing 
 from typing import List, Tuple
-
+import time
 import torch
 
 # TODO
@@ -20,6 +21,19 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
 )
 
+def timer(func):
+    def wrapper(*args, **kwargs):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+
+        result = func(*args, **kwargs)
+
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start
+        print(f'{func.__name__} took {elapsed} seconds')
+        return result
+
+    return wrapper
 
 def prepare_logits_processor(
         temperature: float = 0.0, 
@@ -435,14 +449,14 @@ def update_inference_inputs(
     else:
         token = torch.argmax(prob)
         token = token[None, None]
-    hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
-    tree_logits = model.ea_layer.topK_genrate(hidden_state,
+    #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    tree_logits = model.ea_layer.topK_genrate(accept_hidden_state_new,
                                               input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
                                               head=model.base_model.lm_head, logits_processor=logits_processor)
 
     new_token += accept_length + 1
 
-    return input_ids, tree_logits, new_token, hidden_state, token
+    return input_ids, tree_logits, new_token, None, token
 
 
 if __name__ == "__main__":
