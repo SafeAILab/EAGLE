@@ -1,5 +1,9 @@
 import copy
 import random
+
+
+# typing 
+from typing import List, Tuple
 import time
 import torch
 
@@ -32,7 +36,10 @@ def timer(func):
     return wrapper
 
 def prepare_logits_processor(
-        temperature=0.0, repetition_penalty=0.0, top_p=0.0, top_k=0
+        temperature: float = 0.0, 
+        repetition_penalty: float = 0.0, 
+        top_p: float = 0.0, 
+        top_k: int = 0
 ) -> LogitsProcessorList:
     processor_list = LogitsProcessorList()
     if temperature >= 1e-5 and temperature != 1.0:
@@ -51,7 +58,7 @@ def prepare_logits_processor(
 #     )
 
 
-def pad_path(path, length, pad_value=-2):
+def pad_path(path: List[int], length: int, pad_value: int = -2) -> List[int]:
     """
     Pad the given path list with a specific value up to a specified length.
 
@@ -220,7 +227,7 @@ def reset_tree_mode(
     model.base_model.model.tree_mode = None
 
 
-def reset_past_key_values(passed_key_values):
+def reset_past_key_values(passed_key_values: List[torch.Tensor]) -> List[torch.Tensor]:
     """
     Resets the current lengths in the passed key-values to zero.
 
@@ -296,8 +303,15 @@ def tree_decoding(
 
 
 def evaluate_posterior(
-        logits, candidates, logits_processor, cart_candidates_prob, op, p_indices, tree_candidates, b_indices
-):
+        logits: torch.Tensor, 
+        candidates: torch.Tensor, 
+        logits_processor, 
+        cart_candidates_prob, 
+        op, 
+        p_indices, 
+        tree_candidates, 
+        b_indices
+) -> Tuple[torch.Tensor, int]:
     """
     Evaluate the posterior probabilities of the candidates based on the provided logits and choose the best candidate.
 
