@@ -452,7 +452,7 @@ def len_list(x,n):
     return [i for i in x if len(i)<=n]
 
 class Model(nn.Module):
-    def __init__(self,config,load_emb=False,path=None):
+    def __init__(self,config,load_emb=False,path=None,bias=True):
         super().__init__()
 
 
@@ -461,6 +461,7 @@ class Model(nn.Module):
         self.gradient_checkpointing = True
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         if load_emb:
@@ -488,7 +489,7 @@ class Model(nn.Module):
         #self.init_tree()
 
         self.layers = nn.ModuleList([LlamaDecoderLayer(config,index) for index in range(config.num_hidden_layers)])
-        self.fc=nn.Linear(2*config.hidden_size,config.hidden_size)
+        self.fc=nn.Linear(2*config.hidden_size,config.hidden_size,bias=bias)
         self.act=ACT2FN[config.hidden_act]
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
@@ -690,96 +691,6 @@ class Model(nn.Module):
         self.stable_kv=None
 
     @torch.no_grad()
-    def topK_genrate_batch(self,hidden_states,input_ids,head,max_length=4,use_cache=True):
-        #input_ids = torch.tensor([state[1:]])
-        input_ids = input_ids[:, 1:]
-        input_ids = input_ids.to(hidden_states.device)
-        sslogits=[]
-        self.reset()
-        if use_cache:
-
-
-
-            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids,use_cache=True)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-            topk_index = torch.topk(last_headout, 3, dim=-1).indices
-
-            # hidden_states = torch.cat((hidden_states, out_hidden[:, -1:]), dim=1)
-            hidden_states = out_hidden[:, -1:]
-            hidden_states = hidden_states.repeat(3, 1, 1)
-            #input_ids = input_ids.repeat(3, 1)
-            input_ids = topk_index.t()
-            past_key_values = self.repeat_kv(past_key_values,3)
-            out_hidden,past_key_values = self(hidden_states, input_ids=input_ids,past_key_values=past_key_values,use_cache=True)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-
-            hidden_states = out_hidden[0:1, -1:]
-            #input_ids = input_ids[:1]
-            topk_index = torch.topk(last_headout[:1], 3, dim=-1).indices
-            #hidden_states = torch.cat((hidden_states, out_hidden[0:1, -1:]), dim=1)
-            hidden_states = hidden_states.repeat(3, 1, 1)
-            #input_ids = input_ids.repeat(3, 1)
-            input_ids = topk_index.t()
-            out_hidden,past_key_values = self(hidden_states, input_ids=input_ids,past_key_values=past_key_values,use_cache=True)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-
-            #hidden_states = hidden_states[:1]
-            #input_ids = input_ids[:1]
-            topk_index = torch.topk(last_headout[:1], 3, dim=-1).indices
-            hidden_states = out_hidden[0:1, -1:]
-            input_ids = topk_index[:, :1]
-            past_key_values=self.reduce_kv(past_key_values,1)
-            out_hidden,past_key_values = self(hidden_states, input_ids=input_ids,past_key_values=past_key_values,use_cache=True)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-        else:
-            out_hidden = self(hidden_states, input_ids=input_ids)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-            topk_index=torch.topk(last_headout, 3, dim=-1).indices
-
-            hidden_states = torch.cat((hidden_states, out_hidden[:, -1:]), dim=1)
-            hidden_states=hidden_states.repeat(3,1,1)
-            input_ids=input_ids.repeat(3,1)
-            input_ids=torch.cat((input_ids,topk_index.t()),dim=-1)
-            out_hidden = self(hidden_states, input_ids=input_ids)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-
-            hidden_states=hidden_states[:1]
-            input_ids=input_ids[:1]
-            topk_index = torch.topk(last_headout[:1], 3, dim=-1).indices
-            hidden_states = torch.cat((hidden_states, out_hidden[0:1, -1:]), dim=1)
-            hidden_states = hidden_states.repeat(3, 1, 1)
-            input_ids = input_ids.repeat(3, 1)
-            input_ids = torch.cat((input_ids, topk_index.t()), dim=-1)
-            out_hidden = self(hidden_states, input_ids=input_ids)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-
-            hidden_states = hidden_states[:1]
-            input_ids = input_ids[:1]
-            topk_index = torch.topk(last_headout[:1], 3, dim=-1).indices
-            hidden_states = torch.cat((hidden_states, out_hidden[0:1, -1:]), dim=1)
-            input_ids = torch.cat((input_ids, topk_index[:,:1]), dim=-1)
-            out_hidden = self(hidden_states, input_ids=input_ids)
-            last_hidden = out_hidden[:, -1]
-            last_headout = head(last_hidden)
-            sslogits.append(last_headout)
-
-        return torch.cat(sslogits)
-
-    @torch.no_grad()
     def repeat_hidden(self,hidden_state,repeat_num):
         new_hidden=[]
         for id,i in enumerate(repeat_num):
@@ -861,7 +772,7 @@ class Model(nn.Module):
 
             if hasattr(self, "stable_kv") and self.stable_kv is not None:
                 kv_len=self.stable_kv[0][0].shape[2]
-                out_hidden, past_key_values = self(hidden_states[:,kv_len:], input_ids=input_ids[:,kv_len:], past_key_values=self.stable_kv,use_cache=True)
+                out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:,kv_len:], past_key_values=self.stable_kv,use_cache=True)
             else:
                 out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
             self.stable_kv=past_key_values
@@ -881,7 +792,8 @@ class Model(nn.Module):
                 if logits_processor is not None:
                     topk_index,topk_prob,op=self.sample(last_headout,logits_processor,k=top_k,)
                 else:
-                    topk_index,topk_prob = torch.topk(last_headout, top_k, dim=-1).indices,torch.topk(last_headout, top_k, dim=-1).values
+                    top=torch.topk(last_headout, top_k, dim=-1)
+                    topk_index,topk_prob = top.indices,top.values
                     op=None
 
                 ss_token.append(topk_index)
@@ -919,8 +831,8 @@ class Model(nn.Module):
             if logits_processor is not None:
                 topk_index,topk_prob,op=self.sample(last_headout,logits_processor,k=top_k,)
             else:
-                topk_index, topk_prob = torch.topk(last_headout, top_k, dim=-1).indices, torch.topk(last_headout, top_k,
-                                                                                                    dim=-1).values
+                top = torch.topk(last_headout, top_k, dim=-1)
+                topk_index, topk_prob = top.indices, top.values
                 op=None
             ss_token.append(topk_index)
             ss_prob.append(topk_prob)
