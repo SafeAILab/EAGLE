@@ -278,7 +278,7 @@ When specifying the model weights (including the base model and EAGLE), change "
 
 ## 🌟 Our Contributors
 
-A heartfelt thank you to all our contributors. Your efforts make this project grow and thrive. Every contribution, big or small, is invaluable.
+A heartfelt thank you to all our contributors.
 
 ![Contributors](https://contrib.rocks/image?repo=SafeAILab/EAGLE)
 
