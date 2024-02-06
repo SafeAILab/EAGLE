@@ -276,6 +276,16 @@ python -m model.quantize_EAGLE --checkpoint_path path_of_eagle/model.pth
 
 When specifying the model weights (including the base model and EAGLE), change "path" to "path/model_int4.g32.pth".
 
+## 🌟 Our Contributors
+
+A heartfelt thank you to all our contributors. Your efforts make this project grow and thrive. Every contribution, big or small, is invaluable.
+
+![Contributors](https://contrib.rocks/image?repo=SafeAILab/EAGLE)
+
+## 🌟 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=SafeAILab/EAGLE&type=Date)](https://star-history.com/##SafeAILab/EAGLE&Date)
+
 ## Reference
 For technical details and full experimental results, please check [the paper](https://arxiv.org/pdf/2401.15077.pdf).
 ```
@@ -289,4 +299,4 @@ For technical details and full experimental results, please check [the paper](ht
 
 ## Acknowledgements
 
-This project has been influenced by many excellent projects in the LLM community, such as [Medusa](https://github.com/FasterDecoding/Medusa), [FastChat](https://github.com/lm-sys/FastChat), and others. The logo is designed by GPT-4. We also appreciate many valuable discussions with Tianle Cai, Hao Zhang, and others.
+This project has been influenced by many excellent projects in the LLM community, such as [Medusa](https://github.com/FasterDecoding/Medusa), [FastChat](https://github.com/lm-sys/FastChat), and others. The logo is designed by GPT-4. We also appreciate many valuable discussions with Tianle Cai, Hao Zhang, Ziteng Sun, and others.
