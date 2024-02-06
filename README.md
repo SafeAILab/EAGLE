@@ -282,9 +282,6 @@ A heartfelt thank you to all our contributors.
 
 ![Contributors](https://contrib.rocks/image?repo=SafeAILab/EAGLE)
 
-## 🌟 Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=SafeAILab/EAGLE&type=Date)](https://star-history.com/##SafeAILab/EAGLE&Date)
 
 ## Reference
 For technical details and full experimental results, please check [the paper](https://arxiv.org/pdf/2401.15077.pdf).
