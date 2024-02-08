@@ -138,11 +138,20 @@ def initialize_past_key_values(model,bs=1):
         if data_m!=start_data_m:
             bias=0
             start_data_m=data_m
-        past_key_values.append(
-            [
-                KVCache(past_key_values_data_list[data_m-devices[0].index][2*bias + j], current_length_data[i * 2 + j])
-                for j in range(2)
-            ]
-        )
+        try:
+            past_key_values.append(
+                [
+                    KVCache(past_key_values_data_list[data_m-devices[0].index][2*bias + j], current_length_data[i * 2 + j])
+                    for j in range(2)
+                ]
+            )
+        except:
+            past_key_values.append(
+                [
+                    KVCache(past_key_values_data_list[0][2 * bias + j],
+                            current_length_data[i * 2 + j])
+                    for j in range(2)
+                ]
+            )
         bias+=1
     return past_key_values, past_key_values_data_list, current_length_data
