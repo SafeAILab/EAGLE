@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+
 
 class KVCache:
     """
@@ -14,7 +14,7 @@ class KVCache:
         current_length (int): Current length of the data being stored.
     """
 
-    def __init__(self, data: torch.Tensor, current_length: int) -> None:
+    def __init__(self, data, current_length):
         """
         Initialize the KVCache.
 
@@ -66,7 +66,7 @@ class KVCache:
         return torch.narrow(self.data, 2, 0, self.current_length)
 
 
-def initialize_past_key_values(model: nn.Module):
+def initialize_past_key_values(model):
     """
     Initialize past key and value states for a given transformer model.
 
@@ -138,11 +138,20 @@ def initialize_past_key_values(model: nn.Module):
         if data_m!=start_data_m:
             bias=0
             start_data_m=data_m
-        past_key_values.append(
-            [
-                KVCache(past_key_values_data_list[data_m-devices[0].index][2*bias + j], current_length_data[i * 2 + j])
-                for j in range(2)
-            ]
-        )
+        try:
+            past_key_values.append(
+                [
+                    KVCache(past_key_values_data_list[data_m-devices[0].index][2*bias + j], current_length_data[i * 2 + j])
+                    for j in range(2)
+                ]
+            )
+        except:
+            past_key_values.append(
+                [
+                    KVCache(past_key_values_data_list[0][2 * bias + j],
+                            current_length_data[i * 2 + j])
+                    for j in range(2)
+                ]
+            )
         bias+=1
     return past_key_values, past_key_values_data_list, current_length_data
