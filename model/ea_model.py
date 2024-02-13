@@ -147,10 +147,12 @@ class EaModel(nn.Module):
             max_length=2048,
             tree_choices=mc_sim_7b_63,
             log=False,
+            cpu_only=False,
 
     ):
         if log:
-            torch.cuda.synchronize()
+            if not cpu_only:
+                torch.cuda.synchronize()
             start_time = time.time()
 
         bs = input_ids.shape[0]
@@ -265,7 +267,8 @@ class EaModel(nn.Module):
                     min_uf_newtokens=min(min_uf_newtokens,new_token[batch])
                 if log:
                     if finish_flag[batch]!=newfinish_flag[batch]:
-                        torch.cuda.synchronize()
+                        if not cpu_only:
+                            torch.cuda.synchronize()
                         wall_times[batch]=time.time()-start_time
                 #     out_inputids[batch]=input_ids[batch].tolist()
             finish_flag=newfinish_flag
@@ -278,7 +281,8 @@ class EaModel(nn.Module):
                 break
 
         if log:
-            torch.cuda.synchronize()
+            if not cpu_only:
+                torch.cuda.synchronize()
             for batch in range(bs):
                 if not finish_flag[batch]:
                     wall_times[batch] = time.time() - start_time
@@ -300,10 +304,12 @@ class EaModel(nn.Module):
             max_length=2048,
             tree_choices=mc_sim_7b_63,
             log=False,
+            cpu_only=False,
 
     ):
         if log:
-            torch.cuda.synchronize()
+            if not cpu_only:
+                torch.cuda.synchronize()
             start_time = time.time()
 
         bs = input_ids.shape[0]
@@ -406,7 +412,8 @@ class EaModel(nn.Module):
 
                     if log:
                         if finish_flag[batch] != newfinish_flag[batch]:
-                            torch.cuda.synchronize()
+                            if not cpu_only:
+                                torch.cuda.synchronize()
                             wall_times[batch] = time.time() - start_time
 
             for batch in range(bs):
@@ -422,7 +429,8 @@ class EaModel(nn.Module):
                 break
 
         if log:
-            torch.cuda.synchronize()
+            if not cpu_only:
+                torch.cuda.synchronize()
             for batch in range(bs):
                 if not finish_flag[batch]:
                     wall_times[batch] = time.time() - start_time
