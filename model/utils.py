@@ -392,7 +392,7 @@ def evaluate_posterior(
                         # if has_nan:
                         #     print(1)
                         adjustflag = True
-        if adjustflag:
+        if adjustflag and accept_length != candidates.shape[1]:
             sample_p = gtp
         else:
             gt_logits = logits[best_candidate, accept_length - 1]
