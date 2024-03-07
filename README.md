@@ -75,6 +75,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [Train](#train)
   - [Generate Train Data](#generate-train-data)
   - [Train the Auto-regression Head](#train-the-auto-regression-head)
+  - [Inference on custom models](#inference-on-custom-models)
 - [Evaluation](#evaluation)
 - [With gpt-fast](#with-gpt-fast)
   - [Setup](#setup)
@@ -209,7 +210,7 @@ accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 --cpdir [path of checkpoints]
 ```
 
-### Used on custom models
+### Inference on custom models
 
 If the original LLM structure differs from LLaMA and Mixtral, you can utilize EAGLE in two ways.
 
