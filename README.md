@@ -208,6 +208,42 @@ cd train
 accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
 --cpdir [path of checkpoints]
 ```
+
+### Used on custom models
+
+If the original LLM structure differs from LLaMA and Mixtral, you can utilize EAGLE in two ways.
+
+#### 1. Using the generic modeling_eagle.py
+
+This approach directly encapsulates the native Transformers LLM. Here is an example. **Note: transformers version should be higher than 4.36.**
+
+```python
+from modeling_eagle import EAGLE
+from transformers import AutoModelForCausalLM,AutoTokenizer
+
+tokenizer=AutoTokenizer.from_pretrained(base_model_path)
+model=AutoModelForCausalLM.from_pretrained("base_model_path",torch_dtype=torch.float16,device_map="auto",)
+# for bs>1, the padding side should be right
+if bs>1:
+    tokenizer.padding_side = "left"
+    tokenizer.pad_token = tokenizer.eos_token
+    model.config.pad_token_id = model.config.eos_token_id
+
+text=prompt1
+# text=[prompt1,prompt2]
+inputs = tokenizer(text, return_tensors="pt",padding=True)
+
+eagle=EAGLE(model,eagle_path)
+outs=eagle.generate(**inputs, max_new_tokens=200,temperature=0.0)
+output=tokenizer.decode(outs)
+# output=tokenizer.batch_decode(outs)
+```
+
+#### 2. Modifying the code of the model
+
+Copy the modeling_basemodelname.py from the Transformers library and proceed to make modifications to leverage the pre-allocated kv_cache for enhanced speed in the base model. You can refer to model/modeling_llama_kv.py for guidance, where places that require modifications are annotated with # [MODIFIED]. These modifications are minimal.
+
+
 ## Evaluation
 You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
