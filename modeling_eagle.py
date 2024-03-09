@@ -1084,6 +1084,19 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     retrieve_indices = torch.cat([torch.zeros((retrieve_indices.shape[0], 1), dtype=torch.long), retrieve_indices],
                                  dim=1)
 
+    maxitem = retrieve_indices.max().item() + 5
+
+    def custom_sort(lst):
+        # sort_keys=[len(list)]
+        sort_keys = []
+        for i in range(len(lst)):
+            sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+        return sort_keys
+
+    retrieve_indices = retrieve_indices.tolist()
+    retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+    retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+
     p_indices = torch.tensor(p_indices)
     p_indices_new = p_indices[retrieve_indices]
     p_indices_new = p_indices_new.tolist()
@@ -1267,7 +1280,7 @@ def initialize_tree(input_ids, model, logits_processor, attention_mask=None):
     return tree_logits, logits, hidden_states, token,past_key_value
 
 def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_token, logits_processor):
-    bs=sample_token.shape[0]
+    bs = sample_token.shape[0]
     sample_token = sample_token.to(tree_indices.device)
 
     # candidates_logit = sample_token[0]
@@ -1275,25 +1288,27 @@ def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_toke
 
     candidates_tree_logits = tree_logits[0]
 
-    candidates = torch.cat([candidates_logit, candidates_tree_logits.view(bs,-1)], dim=-1)
+    candidates = torch.cat([candidates_logit, candidates_tree_logits.view(bs, -1)], dim=-1)
 
-    tree_candidates = candidates[:,tree_indices]
+    tree_candidates = candidates[:, tree_indices]
 
     tree_candidates_ext = torch.cat(
-        [tree_candidates, torch.zeros((bs,1), dtype=torch.long, device=tree_candidates.device)], dim=-1)
+        [tree_candidates, torch.zeros((bs, 1), dtype=torch.long, device=tree_candidates.device)-1], dim=-1)
 
-    cart_candidates = tree_candidates_ext[:,retrieve_indices]
+    cart_candidates = tree_candidates_ext[:, retrieve_indices]
 
     if logits_processor is not None:
         candidates_tree_prob = tree_logits[1]
         candidates_prob = torch.cat(
-            [torch.ones((bs,1), device=candidates_tree_prob.device, dtype=torch.float32), candidates_tree_prob.view(bs,-1)],
+            [torch.ones((bs, 1), device=candidates_tree_prob.device, dtype=torch.float32),
+             candidates_tree_prob.view(bs, -1)],
             dim=-1)
 
-        tree_candidates_prob = candidates_prob[:,tree_indices]
+        tree_candidates_prob = candidates_prob[:, tree_indices]
         tree_candidates_prob_ext = torch.cat(
-            [tree_candidates_prob, torch.ones((bs,1), dtype=torch.float32, device=tree_candidates_prob.device)], dim=-1)
-        cart_candidates_prob = tree_candidates_prob_ext[:,retrieve_indices]
+            [tree_candidates_prob, torch.ones((bs, 1), dtype=torch.float32, device=tree_candidates_prob.device)],
+            dim=-1)
+        cart_candidates_prob = tree_candidates_prob_ext[:, retrieve_indices]
     else:
         cart_candidates_prob = None
     # Unsqueeze the tree candidates for dimension consistency.
@@ -1335,7 +1350,8 @@ def tree_decoding(
 
 
 def evaluate_posterior(
-        logits, candidates, logits_processor, cart_candidates_prob, op, p_indices, tree_candidates, b_indices,finish_flag
+        logits, candidates, logits_processor, cart_candidates_prob, op, p_indices, tree_candidates, b_indices,
+        finish_flag
 ):
     """
     Evaluate the posterior probabilities of the candidates based on the provided logits and choose the best candidate.
@@ -1359,58 +1375,56 @@ def evaluate_posterior(
         bs = tree_candidates.size(0)
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
-                candidates[:, :,1:].to(logits.device) == torch.argmax(logits[:, :,:-1], dim=-1)
+                candidates[:, :, 1:].to(logits.device) == torch.argmax(logits[:, :, :-1], dim=-1)
         ).int()
         candidates_accept_length = (torch.cumprod(posterior_mask, dim=-1)).sum(dim=-1)
         accept_length = candidates_accept_length.max(dim=1).values
-        best_candidate = torch.argmax(candidates_accept_length,dim=-1).to(torch.long)
+        best_candidate = torch.argmax(candidates_accept_length, dim=-1).to(torch.long)
 
 
-
-        bt=tuple(range(bs))
-        logits_batch=logits[bt,best_candidate,accept_length,:]
-        accept_length=accept_length.tolist()
+        bt = tuple(range(bs))
+        logits_batch = logits[bt, best_candidate, accept_length, :]
+        accept_length = accept_length.tolist()
 
         for batch in range(bs):
             if finish_flag[batch]:
-                accept_length[batch]=0
+                accept_length[batch] = 0
 
         return best_candidate.tolist(), accept_length, logits_batch
 
     else:
         cart_candidates_prob = cart_candidates_prob.to(logits.device)
-        bs=cart_candidates_prob.size(0)
+        bs = cart_candidates_prob.size(0)
 
         logits = logits_processor(None, logits)
         probs = torch.softmax(logits, dim=-1)
 
-        best_candidate_list=[]
-        accept_length_list=[]
-        sample_p_list=[]
-
+        best_candidate_list = []
+        accept_length_list = []
+        sample_p_list = []
 
         for batch in range(bs):
             accept_length = 1
-            accept_cand = candidates[batch,0,:1]
+            accept_cand = candidates[batch, 0, :1]
             best_candidate = 0
-            # breakflag=False
             for i in range(1, candidates.shape[2]):
-                is_eq = (candidates[batch,:, :accept_length] == accept_cand).all(dim=1)
                 if i != accept_length:
                     break
-                fi = torch.nonzero(is_eq, as_tuple=True)[0][0]
-
-
-                gtp = probs[batch,fi,i-1]
                 adjustflag = False
+                is_eq = (candidates[batch, :, :accept_length] == accept_cand).all(dim=1)
+                fi = torch.nonzero(is_eq, as_tuple=True)[0][0]
+                gtp = probs[batch, fi, i - 1]
+                candidates_set = []
                 for j in range(candidates.shape[1]):
                     if is_eq[j]:
-                        r = random.random()
-                        x = candidates[batch,j, i]
-                        if x == 0:
+                        x = candidates[batch, j, i]
+                        xi = x.item()
+                        if xi in candidates_set or xi == -1:
                             continue
-                        px = gtp[x]
-                        qx = cart_candidates_prob[batch,j, i]
+                        candidates_set.append(xi)
+                        r = random.random()
+                        px = gtp[xi]
+                        qx = cart_candidates_prob[batch, j, i]
                         if qx <= 0:
                             continue
                         acp = px / qx
@@ -1430,12 +1444,12 @@ def evaluate_posterior(
                             gtp[gtp < 0] = 0
                             gtp = gtp / gtp.sum()
                             adjustflag = True
-            if adjustflag:
+            if adjustflag and accept_length != candidates.shape[1]:
                 sample_p = gtp
             else:
-                sample_p = probs[batch,best_candidate,accept_length-1]
+                sample_p = probs[batch, best_candidate, accept_length - 1]
             best_candidate_list.append(best_candidate)
-            accept_length_list.append(accept_length-1)
+            accept_length_list.append(accept_length - 1)
             sample_p_list.append(sample_p)
 
         for batch in range(bs):
