@@ -1,8 +1,10 @@
 import copy
 import random
-
+# typing
+from typing import List, Tuple
 import torch
 import time
+
 # TODO
 # from transformers import LlamaTokenizer
 # tokenizer=LlamaTokenizer.from_pretrained("/home/lyh/weights/hf/vicuna_v13/7B/")
@@ -17,13 +19,14 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
 )
 
+
 class Timer:
-    def __init__(self,name):
+    def __init__(self, name):
         self.name = name
+
     def __enter__(self):
         torch.cuda.synchronize()
         self.start = time.perf_counter()
-
 
     def __exit__(self, exc_type, exc_value, traceback):
         # 计算并打印经过的时间
@@ -31,14 +34,15 @@ class Timer:
         elapsed = time.perf_counter() - self.start
         print(f'{self.name} took {elapsed} seconds')
 
+
 def prepare_logits_processor(
-        temperature: float = 0.0, 
-        repetition_penalty: float = 0.0, 
-        top_p: float = 0.0, 
+        temperature: float = 0.0,
+        repetition_penalty: float = 0.0,
+        top_p: float = 0.0,
         top_k: int = 0
 ) -> LogitsProcessorList:
     processor_list = LogitsProcessorList()
-    if temperature>1e-5:
+    if temperature > 1e-5:
         if temperature >= 1e-5 and temperature != 1.0:
             processor_list.append(TemperatureLogitsWarper(temperature))
         if repetition_penalty > 1.0:
@@ -55,7 +59,7 @@ def prepare_logits_processor(
 #     )
 
 
-def pad_path(path, length, pad_value=-2):
+def pad_path(path: List[int], length: int, pad_value: int = -2) -> List[int]:
     """
     Pad the given path list with a specific value up to a specified length.
 
@@ -166,6 +170,19 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     retrieve_indices = torch.cat([torch.zeros((retrieve_indices.shape[0], 1), dtype=torch.long), retrieve_indices],
                                  dim=1)
 
+    maxitem = retrieve_indices.max().item() + 5
+
+    def custom_sort(lst):
+        # sort_keys=[len(list)]
+        sort_keys = []
+        for i in range(len(lst)):
+            sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+        return sort_keys
+
+    retrieve_indices = retrieve_indices.tolist()
+    retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+    retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+
     p_indices = torch.tensor(p_indices)
     p_indices_new = p_indices[retrieve_indices]
     p_indices_new = p_indices_new.tolist()
@@ -209,11 +226,8 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     return tree_buffers
 
 
-
-def chaininitialize_tree(input_ids, model, tree_attn_mask,  logits_processor,causal_mask):
-
-    input_pos=torch.arange(0,input_ids.shape[1],device=input_ids.device)
-
+def chaininitialize_tree(input_ids, model, tree_attn_mask, logits_processor, causal_mask):
+    input_pos = torch.arange(0, input_ids.shape[1], device=input_ids.device)
 
     logits, hidden_states = model.base_model(input_ids, input_pos)
 
@@ -226,17 +240,13 @@ def chaininitialize_tree(input_ids, model, tree_attn_mask,  logits_processor,cau
         token = torch.argmax(logits[:, -1])
         token = token[None, None]
 
+    model.ea_layer(hidden_states[:, :-1], input_ids[:, 1:], input_pos[:-1])
 
-    model.ea_layer(hidden_states[:,:-1], input_ids[:,1:], input_pos[:-1])
+    intokens = torch.cat((input_ids, token), dim=1)
 
-    intokens=torch.cat((input_ids,token),dim=1)
+    ea_logits = model.chaintopK_genrate(hidden_states[:, -1:], intokens, logits_processor)
 
-    ea_logits  = model.chaintopK_genrate(hidden_states[:,-1:], intokens, logits_processor)
-
-
-
-    return ea_logits,logits,hidden_states,token
-
+    return ea_logits, logits, hidden_states, token
 
 
 def reset_tree_mode(
@@ -246,7 +256,7 @@ def reset_tree_mode(
     model.base_model.model.tree_mode = None
 
 
-def reset_past_key_values(passed_key_values):
+def reset_past_key_values(passed_key_values: List[torch.Tensor]) -> List[torch.Tensor]:
     """
     Resets the current lengths in the passed key-values to zero.
 
@@ -278,7 +288,7 @@ def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_toke
     tree_candidates = candidates[tree_indices]
 
     tree_candidates_ext = torch.cat(
-        [tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
+        [tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device) - 1], dim=0)
 
     cart_candidates = tree_candidates_ext[retrieve_indices]
 
@@ -299,9 +309,6 @@ def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_toke
     return cart_candidates, cart_candidates_prob, tree_candidates
 
 
-
-
-
 def tree_decoding(
         model,
         tree_candidates,
@@ -311,25 +318,23 @@ def tree_decoding(
 ):
     position_ids = tree_position_ids + input_ids.shape[1]
 
-    len_pos=input_ids.shape[1]
-    mask_pos=torch.arange(len_pos,len_pos+tree_candidates.shape[1],device=tree_candidates.device)
-    tree_mask=model.tree_mask
-    model_tree_mask=model.model_tree_mask(len_pos,mask_pos,tree_mask)
+    len_pos = input_ids.shape[1]
+    mask_pos = torch.arange(len_pos, len_pos + tree_candidates.shape[1], device=tree_candidates.device)
+    tree_mask = model.tree_mask
+    model_tree_mask = model.model_tree_mask(len_pos, mask_pos, tree_mask)
 
     # tree_candidates_base=tree_candidates.clone()
     # position_ids_base=position_ids.clone()
     # mask_pos_base=mask_pos.clone()
     # model_tree_mask_base=model_tree_mask.clone()
-    #print(tree_candidates_base)
+    # print(tree_candidates_base)
 
-    #with Timer("sbase"):
-    #print(mask_pos_base)
-    tree_logits,hidden_state=model.base_forward(tree_candidates,position_ids,mask_pos,model_tree_mask)
+    # with Timer("sbase"):
+    # print(mask_pos_base)
+    tree_logits, hidden_state = model.base_forward(tree_candidates, position_ids, mask_pos, model_tree_mask)
 
     # tree_logits_out=tree_logits.clone()
     # hidden_state_out=hidden_state.clone()
-
-
 
     logits = tree_logits[0, retrieve_indices]
     return logits, hidden_state
@@ -340,22 +345,16 @@ def chaintree_decoding(
         candidates,
         input_ids,
 ):
+    len_pos = input_ids.shape[1]
+    mask_pos = torch.arange(len_pos, len_pos + candidates.shape[1], device=candidates.device)
 
-
-    len_pos=input_ids.shape[1]
-    mask_pos=torch.arange(len_pos,len_pos+candidates.shape[1],device=candidates.device)
-
-
-
-    #with Timer("sbase"):
-    #print(mask_pos_base)
+    # with Timer("sbase"):
+    # print(mask_pos_base)
     with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_mem_efficient=False, enable_math=True):
-        tree_logits,hidden_state=model.base_forward(candidates,mask_pos)
+        tree_logits, hidden_state = model.base_forward(candidates, mask_pos)
 
     # tree_logits_out=tree_logits.clone()
     # hidden_state_out=hidden_state.clone()
-
-
 
     logits = tree_logits
     return logits, hidden_state
@@ -364,7 +363,6 @@ def chaintree_decoding(
 def evaluate_posterior(
         logits, candidates, logits_processor, cart_candidates_prob, op, p_indices, tree_candidates, b_indices
 ):
-
     if logits_processor is None:
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
@@ -385,24 +383,25 @@ def evaluate_posterior(
         accept_length = 1
         accept_cand = candidates[0][:1]
         best_candidate = 0
-        # breakflag=False
         for i in range(1, candidates.shape[1]):
-            is_eq = (candidates[:, :accept_length] == accept_cand).all(dim=1)
             if i != accept_length:
-                # breakflag=True
                 break
+            adjustflag = False
+            is_eq = (candidates[:, :accept_length] == accept_cand).all(dim=1)
             fi = torch.nonzero(is_eq, as_tuple=True)[0][0]
             gt_logits = logits[fi, i - 1][None]
             gt_logits = logits_processor(None, gt_logits)[0]
             gtp = torch.softmax(gt_logits, dim=0)
-            adjustflag = False
+            candidates_set = []
             for j in range(candidates.shape[0]):
                 if is_eq[j]:
-                    r = random.random()
                     x = candidates[j, i]
-                    if x == 0:
+                    xi = x.item()
+                    if xi in candidates_set or xi == -1:
                         continue
-                    px = gtp[x]
+                    candidates_set.append(xi)
+                    r = random.random()
+                    px = gtp[xi]
                     qx = cart_candidates_prob[j, i]
                     if qx <= 0:
                         continue
@@ -422,11 +421,8 @@ def evaluate_posterior(
                         gtp = gtp - q
                         gtp[gtp < 0] = 0
                         gtp = gtp / gtp.sum()
-                        # has_nan = torch.isnan(gtp).any()
-                        # if has_nan:
-                        #     print(1)
                         adjustflag = True
-        if adjustflag:
+        if adjustflag and accept_length != candidates.shape[1]:
             sample_p = gtp
         else:
             gt_logits = logits[best_candidate, accept_length - 1]
@@ -437,7 +433,6 @@ def evaluate_posterior(
 def chainevaluate_posterior(
         logits, candidates, logits_processor, cart_candidates_prob, op,
 ):
-
     if logits_processor is None:
         # Find the tokens that match the maximum logits for each position in the sequence
         posterior_mask = (
@@ -538,7 +533,7 @@ def update_inference_inputs(
     # print(model.base_model.layers[0].attention.kv_cache.k_cache[0,0,prev_input_len])
 
     # Update the current length tensor (currently only support batch size is 1)
-    #current_length_data=prev_input_len + tgt.shape[-2]
+    # current_length_data=prev_input_len + tgt.shape[-2]
 
     retrieve_hidden_state_new = hidden_state_new[:, retrieve_indices]
     accept_hidden_state_new = retrieve_hidden_state_new[:, best_candidate, : accept_length + 1]
@@ -551,14 +546,13 @@ def update_inference_inputs(
     else:
         token = torch.argmax(prob)
         token = token[None, None]
-    #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
-    ea_input=torch.cat((input_ids, token.to(input_ids.device)), dim=1)
-    tree_logits = model.topK_genrate(accept_hidden_state_new,ea_input,logits_processor)
+    # hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    ea_input = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
+    tree_logits = model.topK_genrate(accept_hidden_state_new, ea_input, logits_processor)
 
     new_token += accept_length + 1
 
     return input_ids, tree_logits, new_token, None, token
-
 
 
 def chainupdate_inference_inputs(
@@ -588,11 +582,10 @@ def chainupdate_inference_inputs(
     else:
         token = torch.argmax(prob)
         token = token[None, None]
-    #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
-    ea_input=torch.cat((input_ids, token.to(input_ids.device)), dim=1)
-    tree_logits = model.chaintopK_genrate(accept_hidden_state_new,ea_input,logits_processor)
-    #print(model.base_model.layers[0].attention.kv_cache.k_cache[0, 0, prev_input_len])
-
+    # hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    ea_input = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
+    tree_logits = model.chaintopK_genrate(accept_hidden_state_new, ea_input, logits_processor)
+    # print(model.base_model.layers[0].attention.kv_cache.k_cache[0, 0, prev_input_len])
 
     new_token += accept_length + 1
 
