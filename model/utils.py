@@ -1,7 +1,6 @@
 import copy
 import random
 
-
 # typing 
 from typing import List, Tuple
 import time
@@ -21,6 +20,7 @@ from transformers.generation.logits_process import (
     TopPLogitsWarper,
 )
 
+
 def timer(func):
     def wrapper(*args, **kwargs):
         torch.cuda.synchronize()
@@ -35,14 +35,15 @@ def timer(func):
 
     return wrapper
 
+
 def prepare_logits_processor(
-        temperature: float = 0.0, 
-        repetition_penalty: float = 0.0, 
-        top_p: float = 0.0, 
+        temperature: float = 0.0,
+        repetition_penalty: float = 0.0,
+        top_p: float = 0.0,
         top_k: int = 0
 ) -> LogitsProcessorList:
     processor_list = LogitsProcessorList()
-    if temperature>1e-5:
+    if temperature > 1e-5:
         if temperature >= 1e-5 and temperature != 1.0:
             processor_list.append(TemperatureLogitsWarper(temperature))
         if repetition_penalty > 1.0:
@@ -170,6 +171,19 @@ def generate_tree_buffers(tree_choices, device="cuda"):
     retrieve_indices = torch.cat([torch.zeros((retrieve_indices.shape[0], 1), dtype=torch.long), retrieve_indices],
                                  dim=1)
 
+    maxitem = retrieve_indices.max().item() + 5
+
+    def custom_sort(lst):
+        # sort_keys=[len(list)]
+        sort_keys = []
+        for i in range(len(lst)):
+            sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+        return sort_keys
+
+    retrieve_indices = retrieve_indices.tolist()
+    retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+    retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+
     p_indices = torch.tensor(p_indices)
     p_indices_new = p_indices[retrieve_indices]
     p_indices_new = p_indices_new.tolist()
@@ -260,7 +274,7 @@ def generate_candidates(tree_logits, tree_indices, retrieve_indices, sample_toke
     tree_candidates = candidates[tree_indices]
 
     tree_candidates_ext = torch.cat(
-        [tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device)], dim=0)
+        [tree_candidates, torch.zeros((1), dtype=torch.long, device=tree_candidates.device) - 1], dim=0)
 
     cart_candidates = tree_candidates_ext[retrieve_indices]
 
@@ -304,13 +318,13 @@ def tree_decoding(
 
 
 def evaluate_posterior(
-        logits: torch.Tensor, 
-        candidates: torch.Tensor, 
-        logits_processor, 
-        cart_candidates_prob, 
-        op, 
-        p_indices, 
-        tree_candidates, 
+        logits: torch.Tensor,
+        candidates: torch.Tensor,
+        logits_processor,
+        cart_candidates_prob,
+        op,
+        p_indices,
+        tree_candidates,
         b_indices
 ) -> Tuple[torch.Tensor, int]:
     """
@@ -351,24 +365,25 @@ def evaluate_posterior(
         accept_length = 1
         accept_cand = candidates[0][:1]
         best_candidate = 0
-        # breakflag=False
         for i in range(1, candidates.shape[1]):
-            is_eq = (candidates[:, :accept_length] == accept_cand).all(dim=1)
             if i != accept_length:
-                # breakflag=True
                 break
+            adjustflag = False
+            is_eq = (candidates[:, :accept_length] == accept_cand).all(dim=1)
             fi = torch.nonzero(is_eq, as_tuple=True)[0][0]
             gt_logits = logits[fi, i - 1][None]
             gt_logits = logits_processor(None, gt_logits)[0]
             gtp = torch.softmax(gt_logits, dim=0)
-            adjustflag = False
+            candidates_set = []
             for j in range(candidates.shape[0]):
                 if is_eq[j]:
-                    r = random.random()
                     x = candidates[j, i]
-                    if x == 0:
+                    xi = x.item()
+                    if xi in candidates_set or xi == -1:
                         continue
-                    px = gtp[x]
+                    candidates_set.append(xi)
+                    r = random.random()
+                    px = gtp[xi]
                     qx = cart_candidates_prob[j, i]
                     if qx <= 0:
                         continue
@@ -388,9 +403,6 @@ def evaluate_posterior(
                         gtp = gtp - q
                         gtp[gtp < 0] = 0
                         gtp = gtp / gtp.sum()
-                        # has_nan = torch.isnan(gtp).any()
-                        # if has_nan:
-                        #     print(1)
                         adjustflag = True
         if adjustflag and accept_length != candidates.shape[1]:
             sample_p = gtp
@@ -450,7 +462,7 @@ def update_inference_inputs(
     else:
         token = torch.argmax(prob)
         token = token[None, None]
-    #hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
+    # hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
     tree_logits = model.ea_layer.topK_genrate(accept_hidden_state_new,
                                               input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
                                               head=model.base_model.lm_head, logits_processor=logits_processor)
