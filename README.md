@@ -49,9 +49,9 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B model. For an enhanced viewing experience, the animation has been sped up fourfold._
 
 ## Update
-**2024.2.25**: EAGLE is certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md"><b>third-party</b></a> evaluation as the fastest speculative method.
+**2024.2.25**: EAGLE is certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md">third-party</a> evaluation as the fastest speculative method.
 
-**2024.1.17**: We now support  [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
+**2024.1.17**: We now support [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
 
 **2024.1.17**: We have integrated [gpt-fast](https://github.com/pytorch-labs/gpt-fast) into EAGLE, [further accelerating](https://github.com/SafeAILab/EAGLE/tree/eaglefast) the generation speed.
 
