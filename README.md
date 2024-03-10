@@ -40,6 +40,7 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
   	- provably maintaining the consistency with vanilla decoding in the distribution of generated texts.
   	- trainable (within 1-2 days) and testable on 8x RTX 3090 GPUs. So even the GPU poor can afford it.
 	- combinable with other parallelled techniques such as vLLM, DeepSpeed, Mamba, FlashAttention, quantization, and hardware optimization.
+ 	- certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md"><b>third-party</b></a> evaluation as the fastest speculative method.
 
 <p align="center">
   <img src="./figs/demosmall.gif" alt="demogif">
