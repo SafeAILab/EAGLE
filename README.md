@@ -33,8 +33,8 @@ EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new b
 **The sequence of LLM feature vectors is compressible over time, making the prediction of subsequent feature vectors from previous ones easy.**
 
 - EAGLE is:
-	- certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md"><b>third-party</b></a> evaluation as the fastest speculative method. 
-	- achieving **2x** speedup on gpt-fast, one of the **fastest**-known open-sourced inferences.
+	- certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md"><b>third-party</b></a> evaluation as the **fastest** speculative method so far. 
+	- achieving **2x** speedup on <a href="https://github.com/pytorch-labs/gpt-fast"><b>gpt-fast</b></a>.
 	- **3x** faster than vanilla decoding (13B).
  	- **2x** faster than <a href="https://lmsys.org/blog/2023-11-21-lookahead-decoding/"><b>Lookahead</b></a> (13B).
  	- **1.6x** faster than <a href="https://sites.google.com/view/medusa-llm"><b>Medusa</b></a> (13B).
