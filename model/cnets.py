@@ -553,6 +553,7 @@ class Model(nn.Module):
         past_key_values_length = 0
 
         with torch.no_grad():
+            input_ids[input_ids == -1] = 0
             inputs_embeds = self.embed_tokens(input_ids)
             # inputs_embeds = inputs_embeds.detach()
 
