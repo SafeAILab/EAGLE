@@ -6,7 +6,8 @@ python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fa
 import argparse
 import json
 import os
-
+script_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(script_dir)
 #os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
 import time
 import shortuuid
@@ -159,7 +160,6 @@ def get_model_answers(
     model = EaModel.from_pretrained(
         base_model_path=base_model_path,
         ea_model_path=ea_model_path,
-        Type="Mixtral",
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         # load_in_8bit=True,
@@ -185,8 +185,8 @@ def get_model_answers(
     for _ in range(3):
         torch.manual_seed(0)
         conv = get_conversation_template("llama-2-chat")
-        conv.system_message = ''
-        conv.sep2 = "</s>"
+        sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
+        conv.system_message = sys_p
         turns = []
         idxs = []
         new_tokens = []
@@ -195,7 +195,7 @@ def get_model_answers(
             qs = question["turns"][j]
             conv.append_message(conv.roles[0], qs)
             conv.append_message(conv.roles[1], None)
-            prompt = conv.get_prompt()
+            prompt = conv.get_prompt() + " "
             input_ids = tokenizer([prompt]).input_ids
 
             # try:
@@ -255,8 +255,8 @@ def get_model_answers(
         for i in range(num_choices):
             torch.manual_seed(i)
             conv = get_conversation_template("llama-2-chat")
-            conv.system_message = ''
-            conv.sep2 = "</s>"
+            sys_p = "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."
+            conv.system_message = sys_p
             turns = []
             idxs = []
             new_tokens = []
@@ -265,7 +265,7 @@ def get_model_answers(
                 qs = question["turns"][j]
                 conv.append_message(conv.roles[0], qs)
                 conv.append_message(conv.roles[1], None)
-                prompt = conv.get_prompt()
+                prompt = conv.get_prompt() + " "
                 input_ids = tokenizer([prompt]).input_ids
 
                 try:
@@ -423,11 +423,11 @@ if __name__ == "__main__":
 
         ray.init()
 
-    question_file = f"data/{args.bench_name}/question.jsonl"
+    question_file = f"{parent_dir}/data/{args.bench_name}/question.jsonl"
     if args.answer_file:
         answer_file = args.answer_file
     else:
-        answer_file = f"data/{args.bench_name}/model_answer/{args.model_id}.jsonl"
+        answer_file = f"{args.bench_name}/{args.model_id}.jsonl"
 
     print(f"Output to {answer_file}")
 

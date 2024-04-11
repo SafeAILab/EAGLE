@@ -6,25 +6,40 @@ python3 gen_model_answer.py --model-path lmsys/fastchat-t5-3b-v1.0 --model-id fa
 import argparse
 import json
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
+script_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(script_dir)
+from accelerate.utils import set_seed
+set_seed(0)
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3,4,5,6,7"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import time
-
 import shortuuid
-from fastchat.llm_judge.common import load_questions
-from fastchat.model import get_conversation_template
+import torch
 from tqdm import tqdm
 
-from model.ea_model import EaModel
-from model.kv_cache import initialize_past_key_values
-from model.utils import *
-from model.choices import *
+from fastchat.llm_judge.common import load_questions, temperature_config
+from fastchat.model import load_model, get_conversation_template
 
 
-def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
+
+import transformers
+
+
+from ..model.utils_alpha import *
+from ..model.ea_model import EaModel
+from ..model.kv_cache import initialize_past_key_values
+from ..model.choices import *
+
+
+def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None , max_steps = 512):
     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
     # Avoid modifying the input_ids in-place
     input_ids = input_ids.clone()
     model.ea_layer.reset_kv()
+
+    max_len=max([len(i) for i in tree_choices])
+    alpha_num=[0 for _ in range(max_len)]
+    alpha=[0 for _ in range(max_len)]
 
     if hasattr(model, "tree_choices") and model.tree_choices == tree_choices:
         tree_buffers = model.tree_buffers
@@ -32,8 +47,6 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
         tree_buffers = generate_tree_buffers(
             tree_choices, device=model.base_model.model.layers[-1].self_attn.q_proj.weight.device
         )
-        tree_buffers["retrieve_indices_head"] = tree_buffers["retrieve_indices"].to(
-            model.base_model.lm_head.weight.device)
     model.tree_buffers = tree_buffers
     model.tree_choices = tree_choices
 
@@ -56,72 +69,71 @@ def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None,
 
     input_len = input_ids.shape[1]
     reset_tree_mode(model)
-    tree_logits, logits, hidden_state, sample_token = initialize_tree(
-        input_ids, model, tree_buffers["tree_attn_mask"], past_key_values, logits_processor
+    tree_logits, logits,hidden_state,sample_token = initialize_tree(
+            input_ids, model, tree_buffers["tree_attn_mask"], past_key_values,logits_processor
     )
     new_token = 0
 
     for idx in range(max_steps):
-        candidates, cart_candidates_prob, tree_candidates = generate_candidates(
-            tree_logits,
-            tree_buffers["tree_indices"],
-            tree_buffers["retrieve_indices"],
-            sample_token,
-            logits_processor
-        )
-        logits, hidden_state_new, outputs = tree_decoding(
-            model,
-            tree_candidates,
-            past_key_values,
-            tree_buffers["tree_position_ids"],
-            input_ids,
-            tree_buffers["retrieve_indices_head"],
-        )
-        best_candidate, accept_length, sample_p = evaluate_posterior(
-            logits, candidates, logits_processor, cart_candidates_prob, tree_logits[2], tree_buffers["p_indices"],
+        candidates,cart_candidates_prob, tree_candidates = generate_candidates(
+                tree_logits,
+                tree_buffers["tree_indices"],
+                tree_buffers["retrieve_indices"],
+                sample_token,
+                logits_processor
+            )
+        logits, hidden_state_new,outputs = tree_decoding(
+                model,
+                tree_candidates,
+                past_key_values,
+                tree_buffers["tree_position_ids"],
+                input_ids,
+                tree_buffers["retrieve_indices"],
+            )
+        best_candidate, accept_length,sample_p = evaluate_posterior(
+                logits, candidates, logits_processor, cart_candidates_prob,alpha,alpha_num,tree_logits[2], tree_buffers["p_indices"],
             tree_candidates, tree_buffers["b_indices"]
-        )
-        input_ids, tree_logits, new_token, hidden_state, sample_token = update_inference_inputs(
-            input_ids,
-            candidates,
-            best_candidate,
-            accept_length,
-            tree_buffers["retrieve_indices"],
-            logits_processor,
-            logits,
-            tree_logits,
-            new_token,
-            past_key_values_data,
-            current_length_data,
-            model,
-            hidden_state,
-            hidden_state_new,
-            sample_p
-        )
+            )
+        input_ids, tree_logits, new_token,hidden_state,sample_token = update_inference_inputs(
+                input_ids,
+                candidates,
+                best_candidate,
+                accept_length,
+                tree_buffers["retrieve_indices"],
+                logits_processor,
+                logits,
+                tree_logits,
+                new_token,
+                past_key_values_data,
+                current_length_data,
+                model,
+                hidden_state,
+                hidden_state_new,
+                sample_p
+            )
         if tokenizer.eos_token_id in input_ids[0, input_len:].tolist():
             break
         if new_token > 1024:
             break
-        if input_ids.shape[1] > 1960:
+        if input_ids.shape[1]>1960:
             break
-    return input_ids, new_token, idx
-
+    return input_ids, new_token, idx,alpha,alpha_num
 
 def run_eval(
-        base_model_path,
-        ea_model_path,
-        model_id,
-        question_file,
-        question_begin,
-        question_end,
-        answer_file,
-        max_new_token,
-        num_choices,
-        num_gpus_per_model,
-        num_gpus_total,
-        max_gpu_memory,
-        temperature,
-        tree_choices,
+    base_model_path,
+    ea_model_path,
+    model_id,
+    question_file,
+    question_begin,
+    question_end,
+    answer_file,
+    max_new_token,
+    num_choices,
+    num_gpus_per_model,
+    num_gpus_total,
+    max_gpu_memory,
+    temperature,
+    tree_choices,
 ):
     questions = load_questions(question_file, question_begin, question_end)
     # random shuffle the questions to balance the loading
@@ -141,7 +153,7 @@ def run_eval(
     else:
         get_answers_func = get_model_answers
 
-    chunk_size = len(questions) // (num_gpus_total // num_gpus_per_model)  # // 2
+    chunk_size = len(questions) // (num_gpus_total // num_gpus_per_model) # // 2
     ans_handles = []
     for i in range(0, len(questions), chunk_size):
         ans_handles.append(
@@ -149,7 +161,7 @@ def run_eval(
                 base_model_path,
                 ea_model_path,
                 model_id,
-                questions[i: i + chunk_size],
+                questions[i : i + chunk_size],
                 answer_file,
                 max_new_token,
                 num_choices,
@@ -166,24 +178,25 @@ def run_eval(
 
 @torch.inference_mode()
 def get_model_answers(
-        base_model_path,
-        ea_model_path,
-        model_id,
-        questions,
-        answer_file,
-        max_new_token,
-        num_choices,
-        num_gpus_per_model,
-        max_gpu_memory,
-        temperature,
-        tree_choices,
+    base_model_path,
+    ea_model_path,
+    model_id,
+    questions,
+    answer_file,
+    max_new_token,
+    num_choices,
+    num_gpus_per_model,
+    max_gpu_memory,
+    temperature,
+    tree_choices,
 ):
-    # temperature = 0.0
+    #temperature = 0.0
+
+
 
     model = EaModel.from_pretrained(
-        base_model_path=base_model_path,
-        ea_model_path=ea_model_path,
-        Type="Mixtral",
+        base_model_path = base_model_path,
+        ea_model_path = ea_model_path,
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         # load_in_8bit=True,
@@ -192,13 +205,13 @@ def get_model_answers(
 
     tokenizer = model.get_tokenizer()
 
-    if temperature > 1e-5:
+    if temperature>1e-5:
         logits_processor = prepare_logits_processor(temperature=temperature)
     else:
         logits_processor = None
 
     model.eval()
-    print('Check model training state:', model.training)
+    print('Check model training state:',model.training)
 
     cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
     print('CUDA VISIBLE DEVICES:', cuda_visible_devices)
@@ -209,9 +222,7 @@ def get_model_answers(
     for _ in range(3):
         torch.manual_seed(0)
 
-        conv = get_conversation_template("llama-2-chat")
-        conv.system_message = ''
-        conv.sep2 = "</s>"
+        conv = get_conversation_template("vicuna")
         turns = []
         idxs = []
         new_tokens = []
@@ -223,11 +234,17 @@ def get_model_answers(
             prompt = conv.get_prompt()
             input_ids = tokenizer([prompt]).input_ids
 
+
+
+
+
             # try:
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = ea_forward(
+
+
+            output_ids, new_token, idx,alpha,alpha_num = ea_forward(
                 torch.as_tensor(input_ids).cuda(),
                 model,
                 tokenizer,
@@ -236,7 +253,7 @@ def get_model_answers(
             )
             torch.cuda.synchronize()
             total_time = time.time() - start_time
-            output_ids = output_ids[0][len(input_ids[0]):]
+            output_ids = output_ids[0][len(input_ids[0]) :]
             # be consistent with the template's stop_token_ids
             if conv.stop_token_ids:
                 stop_token_ids_index = [
@@ -251,7 +268,7 @@ def get_model_answers(
                 output_ids,
                 spaces_between_special_tokens=False,
             )
-            conv.stop_str = "</s>"
+            conv.stop_str="</s>"
             if conv.stop_str and output.find(conv.stop_str) > 0:
                 output = output[: output.find(conv.stop_str)]
             for special_token in tokenizer.special_tokens_map.values():
@@ -265,6 +282,7 @@ def get_model_answers(
             if conv.name == "xgen" and output.startswith("Assistant:"):
                 output = output.replace("Assistant:", "", 1).strip()
 
+
             turns.append(output)
             idxs.append(int(idx))
             new_tokens.append(int(new_token))
@@ -272,15 +290,14 @@ def get_model_answers(
             conv.messages[-1][-1] = output
     print('Warmup done')
 
-    # questions=questions[6:]
+    #questions=questions[6:]
     for question in tqdm(questions):
+
 
         choices = []
         for i in range(num_choices):
             torch.manual_seed(i)
-            conv = get_conversation_template("llama-2-chat")
-            conv.system_message = ''
-            conv.sep2 = "</s>"
+            conv = get_conversation_template("vicuna")
             turns = []
             idxs = []
             new_tokens = []
@@ -292,10 +309,11 @@ def get_model_answers(
                 prompt = conv.get_prompt()
                 input_ids = tokenizer([prompt]).input_ids
 
+
                 try:
                     torch.cuda.synchronize()
                     start_time = time.time()
-                    output_ids, new_token, idx = ea_forward(
+                    output_ids, new_token, idx,alpha,alpha_num = ea_forward(
                         torch.as_tensor(input_ids).cuda(),
                         model,
                         tokenizer,
@@ -304,7 +322,8 @@ def get_model_answers(
                     )
                     torch.cuda.synchronize()
                     total_time = time.time() - start_time
-                    output_ids = output_ids[0][len(input_ids[0]):]
+                    output_ids = output_ids[0][len(input_ids[0]) :]
+
 
                     if conv.stop_token_ids:
                         stop_token_ids_index = [
@@ -341,7 +360,7 @@ def get_model_answers(
                 wall_time.append(total_time)
                 conv.messages[-1][-1] = output
             # torch.cuda.empty_cache()
-            choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time})
+            choices.append({"index": i, "turns": turns, "idxs": idxs, "new_tokens": new_tokens, "wall_time": wall_time,"alpha":alpha,"alpha_num":alpha_num})
 
         # Dump answers
         os.makedirs(os.path.dirname(answer_file), exist_ok=True)
@@ -375,15 +394,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="/home/lyh/weights/hf/eagle/mix/8x7B/",
+        default="/home/lyh/weights/hf/eagle/vicuna/7B/",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/Mixtral-Instruct/8x7B/",
+    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/vicuna_v13/7B/",
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"
     )
-    parser.add_argument("--model-id", type=str, default="ess-llama-2-chat-70b-fp16")
+    parser.add_argument("--model-id", type=str, default="tmp")
     parser.add_argument(
         "--bench-name",
         type=str,
@@ -432,28 +451,34 @@ if __name__ == "__main__":
         default=1.0,
     )
 
+
     parser.add_argument(
         "--tree-choices",
         type=str,
         default="mc_sim_7b_63",
     )
 
+
+
+
     args = parser.parse_args()
 
-    args.model_id = args.model_id + "-temperature-" + str(args.temperature)
+    args.model_id = args.model_id+"-temperature-"+str(args.temperature)
     args.tree_choices = eval(args.tree_choices)
     if args.num_gpus_total // args.num_gpus_per_model > 1:
         import ray
 
         ray.init()
 
-    question_file = f"data/{args.bench_name}/question.jsonl"
+    question_file = f"{parent_dir}/data/{args.bench_name}/question.jsonl"
     if args.answer_file:
         answer_file = args.answer_file
     else:
-        answer_file = f"data/{args.bench_name}/model_answer/{args.model_id}.jsonl"
+        answer_file = f"{args.bench_name}/{args.model_id}.jsonl"
 
     print(f"Output to {answer_file}")
+
+
 
     run_eval(
         args.base_model_path,

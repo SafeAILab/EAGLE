@@ -89,9 +89,21 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 
 ## Setup & Installation
 
+### With pip 
+
+
 ```bash
-pip install -r requirements.txt
+pip install eagle-llm
 ```
+
+### From the source
+
+```bash
+git clone https://github.com/SafeAILab/EAGLE.git
+cd EAGLE
+pip install -e .
+```
+
 
 ## EAGLE Weights
 
@@ -109,14 +121,14 @@ The inference code we provide automatically allocates model weights (loading a m
 ### With UI
 We have provided a suggested web interface, which you can use by running the following command. After the model is fully loaded, a URL will be output in the terminal, which you can enter into your browser to access.
 ```bash
-python -m application.webui --ea-model-path [path of EAGLE weight]\ 
+python -m eagle.application.webui --ea-model-path [path of EAGLE weight]\ 
 		--base-model-path [path of the original model]\
 		--model-type [vicuna or llama-2-chat]
 ```
 ### With Code
 You can use our provided "eagenerate" for speedup generation just like using 'generate' from Hugging Face. Here is an example.
 ```python
-from model.ea_model import EaModel
+from eagle.model.ea_model import EaModel
 from fastchat.model import get_conversation_template
 model = EaModel.from_pretrained(
     base_model_path=base_model_path,
@@ -153,14 +165,9 @@ output=model.tokenizer.decode(output_ids[0])
 
 ### Batch size > 1
 
-Switch to the *bsne1* branch.
-
-```bash
-git checkout bsne1
-```
 Here is an example. Note that left padding is needed.
 ```python
-from model.ea_model import EaModel
+from eagle.modelbsne1.ea_model import EaModel
 from fastchat.model import get_conversation_template
 
 model = EaModel.from_pretrained(
@@ -206,14 +213,14 @@ print(output)
 ### Generate Train Data
 You can run the following command to generate the training data.
 ```bash
-python -m ge_data.allocation --outdir [path of data]
+python -m eagle.ge_data.allocation --outdir [path of data]
 ```
 ### Train the Auto-regression Head
 ```bash
-cd train
-accelerate launch --mixed_precision=bf16 main.py --tmpdir [path of data]\
---cpdir [path of checkpoints]
+accelerate launch -m --mixed_precision=bf16 eagle.train.main --tmpdir [path of data]\
+--cpdir [path of checkpoints] -- configpath [path of config file]
 ```
+*eagle/train* provides examples of configuration files.
 
 ### Inference on custom models
 
@@ -224,7 +231,7 @@ If the original LLM structure differs from LLaMA and Mixtral, you can utilize EA
 This approach directly encapsulates the native Transformers LLM. Here is an example. **Note: transformers version should be higher than 4.36.**
 
 ```python
-from modeling_eagle import EAGLE
+from eagle.modeling_eagle import EAGLE
 from transformers import AutoModelForCausalLM,AutoTokenizer
 
 tokenizer=AutoTokenizer.from_pretrained(base_model_path)
@@ -253,13 +260,13 @@ Copy the modeling_basemodelname.py from the Transformers library and proceed to 
 ## Evaluation
 You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
-python -m evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
+python -m eagle.evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
 		 --ea-model-path [path of EAGLE weight]\ 
 		 --base-model-path [path of the original model]\
 ```
 If you need specific acceleration ratios, you will also need to run the following command to get the speed of vanilla auto-regression.
 ```bash
-python -m evaluation.gen_baseline_answer_vicuna\
+python -m eagle.evaluation.gen_baseline_answer_vicuna\
 		(or gen_ea_answer_vicuna_llama2chat)\
 		 --ea-model-path [path of EAGLE weight]\ 
 		 --base-model-path [path of the original model]\
@@ -291,6 +298,7 @@ In EAGLE, using gpt-fast only requires three steps: setting up the environment, 
 Switch to the *eaglefast* branch.
 
 ```bash
+git clone https://github.com/SafeAILab/EAGLE.git
 git checkout eaglefast
 ```
 
