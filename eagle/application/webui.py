@@ -3,7 +3,7 @@ import time
 
 import gradio as gr
 import argparse
-from model.ea_model import EaModel
+from ..model.ea_model import EaModel
 import torch
 from fastchat.model import get_conversation_template
 import re
