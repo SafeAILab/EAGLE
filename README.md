@@ -336,10 +336,10 @@ A heartfelt thank you to all our contributors.
 ## Reference
 For technical details and full experimental results, please check [the paper](https://arxiv.org/pdf/2401.15077.pdf).
 ```
-@article{li2024eagle, 
+@inproceedings{li2024eagle, 
 	author = {Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang}, 
 	title = {EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty}, 
-	journal = {arXiv preprint arXiv:2401.15077},
+	booktitle = {International Conference on Machine Learning},
 	year = {2024}
 }
 ```
