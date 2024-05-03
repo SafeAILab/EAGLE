@@ -66,7 +66,7 @@ _Inference is conducted on RTX 3090 GPUs at fp16 precision using the Vicuna 33B 
 - [x] Support bs > 1.
 - [x] Support gpt-fast.
 - [x] Support more LLMs such as Mixtral 8x7B.
-- [ ] Support vLLM.
+- [ ] Support LLaMA-3.
 
 
 ## Contents
