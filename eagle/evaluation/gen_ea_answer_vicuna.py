@@ -22,7 +22,7 @@ from ..model.utils import *
 from ..model.choices import *
 
 
-def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=512):
+def ea_forward(input_ids, model, tokenizer, tree_choices, logits_processor=None, max_steps=2048):
     assert input_ids.shape[0] == 1, "Only support batch size 1 for now!!"
     # Avoid modifying the input_ids in-place
     input_ids = input_ids.clone()
