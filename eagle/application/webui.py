@@ -1,9 +1,13 @@
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import time
 
 import gradio as gr
 import argparse
-from ..model.ea_model import EaModel
+try:
+    from ..model.ea_model import EaModel
+except:
+    from eagle.model.ea_model import EaModel
 import torch
 from fastchat.model import get_conversation_template
 import re
@@ -104,14 +108,37 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
         conv = get_conversation_template("llama-2-chat")
         conv.system_message = ''
         conv.sep2 = "</s>"
+    elif args.model_type == "llama-3-instruct":
+        messages = [
+            {"role": "system",
+             "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
+        ]
 
     for query, response in pure_history:
-        conv.append_message(conv.roles[0], query)
-        if args.model_type == "llama-2-chat" and response:
-            response = " " + response
-        conv.append_message(conv.roles[1], response)
+        if args.model_type == "llama-3-instruct":
+            messages.append({
+                "role": "user",
+                "content": query
+            })
+            if response!=None:
+                messages.append({
+                    "role": "assistant",
+                    "content": response
+                })
+        else:
+            conv.append_message(conv.roles[0], query)
+            if args.model_type == "llama-2-chat" and response:
+                response = " " + response
+            conv.append_message(conv.roles[1], response)
 
-    prompt = conv.get_prompt()
+    if args.model_type == "llama-3-instruct":
+        prompt = model.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    else:
+        prompt = conv.get_prompt()
 
     if args.model_type == "llama-2-chat":
         prompt += " "
@@ -127,13 +154,16 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
     if use_EaInfer:
 
         for output_ids in model.ea_generate(input_ids, temperature=temperature, top_p=top_p,
-                                            max_steps=args.max_new_token):
+                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct"):
             totaltime+=(time.time()-start_time)
             total_ids+=1
             decode_ids = output_ids[0, input_len:].tolist()
             decode_ids = truncate_list(decode_ids, model.tokenizer.eos_token_id)
+            if args.model_type == "llama-3-instruct":
+                decode_ids = truncate_list(decode_ids, model.tokenizer.convert_tokens_to_ids("<|eot_id|>"))
             text = model.tokenizer.decode(decode_ids, skip_special_tokens=True, spaces_between_special_tokens=False,
                                           clean_up_tokenization_spaces=True, )
+
             naive_text.append(model.tokenizer.decode(output_ids[0, cu_len], skip_special_tokens=True,
                                                      spaces_between_special_tokens=False,
                                                      clean_up_tokenization_spaces=True, ))
@@ -153,7 +183,7 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
 
     else:
         for output_ids in model.naive_generate(input_ids, temperature=temperature, top_p=top_p,
-                                               max_steps=args.max_new_token):
+                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct"):
             totaltime += (time.time() - start_time)
             total_ids+=1
             decode_ids = output_ids[0, input_len:].tolist()
@@ -212,10 +242,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--ea-model-path",
     type=str,
-    default="/home/lyh/weights/hf/eagle/llama2chat/7B/",
+    default="/home/lyh/weights/l38b/",
     help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
 )
-parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/7B/",
+parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama3chat/8B/",
                     help="path of basemodel, huggingface project or local path")
 parser.add_argument(
     "--load-in-8bit", action="store_true", help="Use 8-bit quantization"
@@ -223,7 +253,13 @@ parser.add_argument(
 parser.add_argument(
     "--load-in-4bit", action="store_true", help="Use 4-bit quantization"
 )
-parser.add_argument("--model-type", type=str, default="llama-2-chat",choices=["llama-2-chat","vicuna","mixtral"], help="llama-2-chat or vicuna, for chat template")
+parser.add_argument("--model-type", type=str, default="llama-3-instruct",choices=["llama-2-chat","vicuna","mixtral","llama-3-instruct"])
+parser.add_argument(
+    "--total-token",
+    type=int,
+    default=60,
+    help="The maximum number of new generated tokens.",
+)
 parser.add_argument(
     "--max-new-token",
     type=int,
@@ -235,11 +271,12 @@ args = parser.parse_args()
 model = EaModel.from_pretrained(
     base_model_path=args.base_model_path,
     ea_model_path=args.ea_model_path,
+    total_token=args.total_token,
     torch_dtype=torch.float16,
     low_cpu_mem_usage=True,
     load_in_4bit=args.load_in_4bit,
     load_in_8bit=args.load_in_8bit,
-    device_map="auto"
+    device_map="auto",
 )
 model.eval()
 warmup(model)
@@ -252,17 +289,17 @@ custom_css = """
 
 with gr.Blocks(css=custom_css) as demo:
     gs = gr.State({"pure_history": []})
-    gr.Markdown('''## EAGLE Chatbot''')
+    gr.Markdown('''## EAGLE-2 Chatbot''')
     with gr.Row():
         speed_box = gr.Textbox(label="Speed", elem_id="speed", interactive=False, value="0.00 tokens/s")
         compression_box = gr.Textbox(label="Compression Ratio", elem_id="speed", interactive=False, value="0.00")
     with gr.Row():
         with gr.Column():
-            use_EaInfer = gr.Checkbox(label="Use EAGLE", value=True)
-            highlight_EaInfer = gr.Checkbox(label="Highlight the tokens generated by EAGLE", value=True)
+            use_EaInfer = gr.Checkbox(label="Use EAGLE-2", value=True)
+            highlight_EaInfer = gr.Checkbox(label="Highlight the tokens generated by EAGLE-2", value=True)
         temperature = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, label="temperature", value=0.5)
         top_p = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, label="top_p", value=0.9)
-    note=gr.Markdown(show_label=False,interactive=False,value='''The Compression Ratio is defined as the number of generated tokens divided by the number of forward passes in the original LLM. If "Highlight the tokens generated by EAGLE" is checked, the tokens correctly guessed by EAGLE 
+    note=gr.Markdown(show_label=False,interactive=False,value='''The Compression Ratio is defined as the number of generated tokens divided by the number of forward passes in the original LLM. If "Highlight the tokens generated by EAGLE-2" is checked, the tokens correctly guessed by EAGLE-2 
     will be displayed in orange. Note: Checking this option may cause special formatting rendering issues in a few cases, especially when generating code''')
 
 
