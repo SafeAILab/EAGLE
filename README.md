@@ -5,7 +5,7 @@
 <a href="https://arxiv.org/pdf/2406.16858"><b>Paper (EAGLE-2)</b></a> |
 <a href="https://sites.google.com/view/
 eagle-llm"><b>Blog</b></a> |
-<a href="https://9bb231f8c2d3810206.gradio.live/"><b>Demo</b></a> |
+<a href="https://huggingface.co/spaces/yuhuili/EAGLE-2"><b>Demo</b></a> |
 </p>
 
 
