@@ -165,7 +165,7 @@ python -m eagle.ge_data.allocation --outdir [path of data]
 ### Train the Auto-regression Head
 ```bash
 accelerate launch -m --mixed_precision=bf16 eagle.train.main --tmpdir [path of data]\
---cpdir [path of checkpoints] -- configpath [path of config file]
+--cpdir [path of checkpoints] --configpath [path of config file]
 ```
 *eagle/train* provides examples of configuration files.
 
