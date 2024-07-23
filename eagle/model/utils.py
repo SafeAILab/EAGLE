@@ -51,7 +51,7 @@ def prepare_logits_processor(
             processor_list.append(TopPLogitsWarper(top_p))
         if top_k > 0:
             processor_list.append(TopKLogitsWarper(top_k))
-        return processor_list
+    return processor_list
 
 
 # test_processor = prepare_logits_processor(
