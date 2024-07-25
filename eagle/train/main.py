@@ -1,4 +1,7 @@
 import argparse
+import math
+import torch.distributed as dist
+import ipdb
 
 parser = argparse.ArgumentParser(description='sp')
 parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/vicuna_v13/7B/')
@@ -13,6 +16,7 @@ args = parser.parse_args()
 
 train_config = {
     "lr": args.lr,
+    "final_lr": args.lr * 0.1,
     "bs": args.bs,
     "gradient_accumulation_steps": args.gradient_accumulation_steps,
     "datapath": f"{args.tmpdir}",
@@ -20,11 +24,11 @@ train_config = {
     "num_epochs": 20,
     # Depending on your data and model size, the larger the model, the higher the sample efficiency. We recommend setting it between 20-40.
     "num_warmup_steps": 2000,
-    "total_steps": 800000,
+    "total_steps": 8000000,
     "p_w": 0.1,
     "v_w": 1.0,
     "head_w": 0.1,
-    "num_workers": 2,
+    "num_workers": 0,
     "embeding": True,
     "act": "No",
     "data_noise": True,
@@ -37,7 +41,7 @@ train_config = {
     "config_path": args.configpath,
     "b1": 0.9,
     "b2": 0.95,
-    "grad_clip": 0.5,
+    "grad_clip": 4,
     "save_freq": 5
 }
 import json
@@ -64,6 +68,7 @@ from tqdm import tqdm
 # import accelerate
 import numpy as np
 from transformers import get_linear_schedule_with_warmup, AutoConfig
+from transformers import get_cosine_schedule_with_warmup
 
 if accelerator.is_main_process:
     import wandb
@@ -285,7 +290,7 @@ def getkacc(model, data, head, max_length=5):
                 single_input_ids = torch.cat((single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)),
                                              dim=1)
 
-    acc = [correct[i] / total[i] if total[i] else 0 for i in range(len(correct))]
+    acc = [correct[i] / total[i] for i in range(len(correct))]
     return acc
 
 
@@ -309,6 +314,10 @@ testdataset = CustomDataset(testdatapath)
 train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=True,
                           collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"],
                           pin_memory=True)
+
+global_step = len(train_loader) * train_config["num_epochs"]  // dist.get_world_size()
+    
+
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], shuffle=False,
                          collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"], pin_memory=True)
 # for batch_data in train_loader:
@@ -329,12 +338,32 @@ num_warmup_steps = train_config["num_warmup_steps"]
 total_steps = train_config["total_steps"]
 is_warmup = train_config["is_warmup"]
 
-if is_warmup:
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps,
-                                                num_training_steps=total_steps)
+from torch.optim import Optimizer
 
-    model, head, optimizer, train_loader, test_loader, scheduler = accelerator.prepare(
-        model, head, optimizer, train_loader, test_loader, scheduler
+class CustomLRScheduler(torch.optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer: Optimizer, warmup_steps: int, total_steps: int, base_lr: float, final_lr: float, last_epoch: int = -1):
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.base_lr = base_lr
+        self.final_lr = final_lr
+        super(CustomLRScheduler, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        if self.last_epoch < self.warmup_steps:
+            return [self.base_lr * (self.last_epoch + 1) / self.warmup_steps for _ in self.optimizer.param_groups]
+        elif self.last_epoch < self.total_steps:
+            decay_steps = self.total_steps - self.warmup_steps
+            decay_epoch = self.last_epoch - self.warmup_steps
+            cosine_decay = 0.5 * (1 + math.cos(math.pi * decay_epoch / decay_steps))
+            return [self.final_lr + (self.base_lr - self.final_lr) * cosine_decay for _ in self.optimizer.param_groups]
+        else:
+            return [self.final_lr for _ in self.optimizer.param_groups]
+
+if is_warmup:
+    scheduler = CustomLRScheduler(optimizer, warmup_steps=num_warmup_steps, total_steps=global_step, base_lr=train_config['lr'], final_lr=train_config['final_lr'])
+
+    model, head, optimizer, train_loader, test_loader = accelerator.prepare(
+        model, head, optimizer, train_loader, test_loader
     )
 else:
     model, head, optimizer, train_loader, test_loader = accelerator.prepare(
@@ -366,6 +395,8 @@ for epoch in range(num_epochs + 1):
             vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum()+1e-5)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             # loss.backward()
+            if accelerator.is_main_process and batch_idx % 20 == 0:
+                print(f"batch_idx: {batch_idx} \n| loss: {loss} \n| vloss: {vloss} \n | ploss: {ploss} | lr: {optimizer.param_groups[0]['lr']}")
             accelerator.backward(loss)
             accelerator.clip_grad_value_(model.parameters(), train_config["grad_clip"])
             optimizer.step()
@@ -406,7 +437,10 @@ for epoch in range(num_epochs + 1):
     top_3acc = accelerator.gather_for_metrics(top_3acc)
     if accelerator.is_local_main_process:
         for id, i in enumerate(top_3acc):
-            wandb.log({f'train/epochtop_{id + 1}_acc': i.sum().item() / total})
+            try:
+                wandb.log({f'train/epochtop_{id + 1}_acc': i.sum().item() / total})
+            except:
+                pass
     if accelerator.is_local_main_process:
         print('Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, num_epochs, epoch_loss))
         print('Train Accuracy: {:.2f}%'.format(100 * correct / total))
