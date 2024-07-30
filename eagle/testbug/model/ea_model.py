@@ -4,9 +4,6 @@ import time
 
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, PretrainedConfig,AutoConfig
-from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
-from .modeling_Mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 from .choices import mc_sim_7b_63
