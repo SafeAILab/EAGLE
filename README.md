@@ -57,8 +57,6 @@ EAGLE-2 uses the confidence scores from the draft model to approximate acceptanc
 Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla autoregressive decoding on an A100 GPU.
 
 ## Update
-**2024.8.8**: We now support Qwen-2.
-
 **2024.6.27**: EAGLE-2 is released.
 
 **2024.2.25**: EAGLE is certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md">third-party</a> evaluation as the fastest speculative method.
@@ -103,6 +101,8 @@ pip install -r requirements.txt
 
 
 ## EAGLE Weights
+
+*Note:* When Qwen2 is the target model, please use bf16 precision instead of fp16 to avoid numerical overflow. The training dataset for the draft model of Qwen2 is ShareGPT, which has removed non-English data. Therefore, if you want to use it on non-English data such as Chinese, please train with the corresponding data.
 
 
 Compared to EAGLE, EAGLE-2 does not require additional training and uses the same weights.
