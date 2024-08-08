@@ -4,18 +4,21 @@ import time
 
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, PretrainedConfig,AutoConfig
-from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
-from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
-from .utils import *
-from .kv_cache import initialize_past_key_values
-from .choices import mc_sim_7b_63
+from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer
 import os
-from huggingface_hub import hf_hub_download
+from transformers import PreTrainedModel, PretrainedConfig,AutoConfig
+
+
+from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
+from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
+from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
+from .utils import *
+from .kv_cache import initialize_past_key_values
+
 from .cnets import Model
 from .configs import EConfig
-from huggingface_hub import hf_hub_download
+
 
 
 
@@ -56,9 +59,6 @@ class EaModel(nn.Module):
         if device!=base_model.lm_head.weight.device:
             self.ea_layer.diff_device = True
             if not low_memory:
-                # self.ea_layer.head=nn.Linear(base_model.lm_head.in_features,base_model.lm_head.out_features,bias=False)
-                # self.ea_layer.head.weight=copy.deepcopy(base_model.lm_head.weight)
-                # self.ea_layer.head.to(device)
                 self.ea_layer.headweight = base_model.lm_head.weight.clone().to(device)
             else:
                 self.ea_layer.layer_device = device
@@ -95,6 +95,10 @@ class EaModel(nn.Module):
             base_model = KVLlamaForCausalLM.from_pretrained(
                 base_model_path, **kwargs
             )
+        elif Type=='Qwen2ForCausalLM':
+            base_model=KVQwen2ForCausalLM.from_pretrained(
+                base_model_path, **kwargs
+            )
         else:
             base_model = KVMixtralForCausalLM.from_pretrained(
                 base_model_path, **kwargs
@@ -103,11 +107,19 @@ class EaModel(nn.Module):
         configpath=os.path.join(ea_model_path,"config.json")
         if not os.path.exists(configpath):
             configpath = hf_hub_download(ea_model_path, "config.json")
-        load_model_path=os.path.join(ea_model_path, "pytorch_model.bin")
-        if not os.path.exists(load_model_path):
-            load_model_path=hf_hub_download(ea_model_path, "pytorch_model.bin")
-        ea_layer_state_dict = torch.load(load_model_path,
-                                         map_location="cpu")
+
+        try:
+            load_model_path=os.path.join(ea_model_path, "pytorch_model.bin")
+            if not os.path.exists(load_model_path):
+                load_model_path=hf_hub_download(ea_model_path, "pytorch_model.bin")
+            ea_layer_state_dict = torch.load(load_model_path,
+                                             map_location=base_model.device)
+        except:
+            from safetensors.torch import load_file
+            load_model_path = os.path.join(ea_model_path, "model.safetensors")
+            if not os.path.exists(load_model_path):
+                load_model_path = hf_hub_download(ea_model_path, "model.safetensors")
+            ea_layer_state_dict = load_file(load_model_path)
         model = cls(
             base_model,
             base_model_path,
@@ -168,23 +180,7 @@ class EaModel(nn.Module):
             if output_orig:
                 orig = self.base_model.lm_head(outputs[0])
             hidden_states = outputs[0]
-        # if init:
-        #     if logits_processor is not None:
-        #         logits = orig[:, -1]
-        #         logits = logits_processor(None, logits)
-        #         probabilities = torch.nn.functional.softmax(logits, dim=1)
-        #         token = torch.multinomial(probabilities, 1)
-        #     else:
-        #         token = torch.argmax(orig[:, -1])
-        #         token = token[None, None]
-        #     input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
-        #     # Clone the output hidden states
-        #
-        #     draft_tokens, retrieve_indices,tree_mask,tree_position_ids = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head)
-        #     if output_orig:
-        #         return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, outputs, orig, hidden_states, token
-        #     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, hidden_states, token
-        # else:
+
         if output_orig:
             return outputs, orig, hidden_states
         else:
@@ -533,6 +529,7 @@ class EaModel(nn.Module):
         outputs = self.base_model(input_ids, past_key_values=past_key_values, use_cache=True)
         new_token = 0
 
+
         for idx in range(max_length):
             if logits_processor is not None:
                 logits = outputs.logits[:, -1]
@@ -541,11 +538,14 @@ class EaModel(nn.Module):
                 input_id = torch.multinomial(probabilities, 1)
             else:
                 input_id = outputs.logits[:, -1:].argmax(dim=-1)
+
             outputs = self.base_model(input_id, use_cache=True, past_key_values=past_key_values)
             input_ids = torch.cat([input_ids, input_id], dim=-1)
             new_token += 1
 
             yield input_ids
+
+
 
             if is_llama3:
                 if stop_token_id in input_ids[0, input_len:].tolist():
