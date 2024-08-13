@@ -23,24 +23,12 @@ import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 import math
 from typing import List, Optional, Tuple, Union
-
-import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from transformers.activations import ACT2FN
-from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast, \
-    SequenceClassifierOutputWithPast
-from transformers.modeling_utils import PreTrainedModel
-from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
-from transformers.utils import (
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
-    logging,
-    replace_return_docstrings,
-)
+
 
 try:
     from .configs import EConfig
@@ -52,21 +40,7 @@ except:
     from choices import *
     from utils import prepare_logits_processor
 
-import time
 
-
-class Timer:
-    def __init__(self, name):
-        self.name = name
-
-    def __enter__(self):
-        torch.cuda.synchronize()
-        self.start = time.perf_counter()
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        torch.cuda.synchronize()
-        elapsed = time.perf_counter() - self.start
-        print(f'{self.name} took {elapsed} seconds')
 
 
 # Copied from transformers.models.bart.modeling_bart._make_causal_mask
@@ -231,9 +205,14 @@ class LlamaAttention(nn.Module):
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
                 f" and `num_heads`: {self.num_heads})."
             )
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+        if hasattr(config, "qkv_bias"):
+            self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.qkv_bias)
+            self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.qkv_bias)
+            self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.qkv_bias)
+        else:
+            self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+            self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+            self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self._init_rope()
 
@@ -613,6 +592,7 @@ class Model(nn.Module):
         else:
             position_ids = position_ids.view(-1, seq_length).long()
 
+        #position_ids=position_ids//4
         if attention_mask is None:
             attention_mask = torch.ones(
                 (batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device
@@ -921,5 +901,5 @@ def count_parameters(model):
 
 if __name__ == "__main__":
     config = EConfig.from_pretrained('config.json')
-    model = Model(config, load_emb=True, path="/home/lyh/weights/hf/vicuna_v13/7B/")
+    model = Model(config, load_emb=False)
     print(model)
