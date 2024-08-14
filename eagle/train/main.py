@@ -238,54 +238,58 @@ def top_accuracy(output, target, topk=(1,)):
 
 @torch.no_grad()
 def getkacc(model, data, head, max_length=5):
+    
+    def generate(hidden_states, input_ids, head, max_length=4, use_cache=True):
+        if use_cache:
+            past_key_values = None
+            for i in range(max_length):
+                if past_key_values != None:
+                    out_hidden, past_key_values = model(last_hidden, input_ids=token, past_key_values=past_key_values,
+                                                        use_cache=True)
+                else:
+                    out_hidden, past_key_values = model(hidden_states, input_ids=input_ids, use_cache=True)
+                last_hidden = out_hidden[:, -1:]
+                last_headout = head(last_hidden)
+                token = torch.argmax(last_headout, dim=-1)
+                input_ids = torch.cat((input_ids, token), dim=1)
+
+        else:
+            raise NotImplementedError
+
+        return input_ids
+
     hidden_states = data["hidden_states"]
     input_ids = data["input_ids"]
-    # attention_mask=data["attention_mask"]
     loss_mask = data["loss_mask"]
-    # sample_mask=data["sample_mask"]
     target = data["target"]
     total = [0 for _ in range(max_length)]
     correct = [0 for _ in range(max_length)]
-    bs, sl = hidden_states.shape[0], hidden_states.shape[1]
+    bs, seq_len = hidden_states.shape[0], hidden_states.shape[1]
     target_headout = head(target)
-    hidden_states_headout = head(hidden_states)
+    target_ids = target_headout.argmax(dim=2)
 
-    for i in range(bs):
-        for j in range(sl):
-
-            single_hidden_states = hidden_states[i, :j]
-            single_input_ids = input_ids[i, :j]
-
-            single_hidden_states = single_hidden_states[None, :, :]
-            single_input_ids = single_input_ids[None, :]
+    for pre_len in range(1, seq_len):
+        if loss_mask[:, pre_len].sum() == 0:
+            continue
+        pre_hidden_states = hidden_states[:, :pre_len]
+        pre_input_ids = input_ids[:, :pre_len]
+        outs = generate(pre_hidden_states, pre_input_ids, head, max_length=max_length)
+        generate_ids = outs[:, pre_len:]
+        for bid in range(bs):
             for k in range(max_length):
-                if loss_mask[i, single_hidden_states.shape[1] - 1] == 0:
+                if loss_mask[bid, pre_len + k] == 0:
                     break
-                tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
-                tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
-                target_in_token = torch.argmax(tmp_in_target_headout)
-                target_out_token = torch.argmax(tmp_out_target_headout)
-                tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
-                # tmp_sample_mask=sample_mask[i,single_hidden_states.shape[1]-1]
-                if not (target_in_token == tmp_token):
+                if pre_len + k >= seq_len:
                     break
-                out_hidden = model(single_hidden_states, input_ids=single_input_ids)
-                last_hidden = out_hidden[:, -1]
-                last_headout = head(last_hidden)
-                token = torch.argmax(last_headout)
                 total[k] += 1
-                if token == target_out_token:
+                if generate_ids[bid, k] == target_ids[bid, pre_len + k - 1]:
                     correct[k] += 1
                 else:
                     for kk in range(k + 1, max_length):
                         total[kk] += 1
                     break
 
-                single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
-                single_input_ids = torch.cat((single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)),
-                                             dim=1)
-
-    acc = [correct[i] / total[i] if total[i] else 0 for i in range(len(correct))]
+    acc = [correct[i] / total[i] for i in range(len(correct))]
     return acc
 
 
