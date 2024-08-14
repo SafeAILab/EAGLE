@@ -5,7 +5,6 @@ parser = argparse.ArgumentParser(description='sp')
 parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/llama3chat/8B/')
 parser.add_argument('--tmpdir', type=str,
                     default='/home/lyh/code/nlp/ess/feature_data_dataset/sharegpt_0_67999_mu_V7B/')
-parser.add_argument('--outdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
 parser.add_argument("--local_rank", type=int, default=-1, help="local_rank for distributed training on gpus")
 parser = deepspeed.add_config_arguments(parser)
@@ -40,29 +39,26 @@ train_config = {
 }
 
 from safetensors import safe_open
-# from transformers import AutoModelForCausalLM, AutoTokenizer,AutoModelForSequenceClassification
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
 import torch
 
 torch.backends.cuda.matmul.allow_tf32 = True
 from accelerate import Accelerator
-from accelerate.utils import set_seed, DummyOptim, DummyScheduler
+from accelerate.utils import set_seed
 
 set_seed(0)
 accelerator = Accelerator(mixed_precision="fp16")
 from cnets import Model
 from configs import EConfig
-from datasets import load_dataset
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 # import accelerate
 import numpy as np
-from transformers import PreTrainedTokenizerBase, get_linear_schedule_with_warmup
+
 
 deepspeed.init_distributed()
 rank = torch.distributed.get_rank()
@@ -70,7 +66,6 @@ if rank == 0:
     import wandb
 
     wandb.init(project="llama3-8B", entity="yuhui-li", config=train_config)
-
 
 try:
     with open(os.path.join(args.basepath, "model.safetensors.index.json"), "r") as f:
@@ -143,10 +138,6 @@ class CustomDataset(Dataset):
         input_ids = data['input_ids'][:train_config["max_len"]][None, :]
         loss_mask = data["loss_mask"][:train_config["max_len"]][None, :]
 
-        # except:
-        #     with open("error_path.txt", "w") as file:
-        #         file.write(self.data[index])
-        #     print('error path',self.data[index])
 
         length = hidden_state.shape[1]
         # length_q = data['query_ids'].shape[1]
@@ -167,9 +158,7 @@ class CustomDataset(Dataset):
         new_data["target"] = target
         new_data["hidden_state_big"] = hidden_state
         new_data["input_ids"] = input_ids_target
-        # sample = torch.cat((data['xs'],data['xb']))
-        # sample=torch.cat((self.data[index]['x'],self.data[index]['logits']))
-        # label = data['y']
+
 
         if self.transform:
             new_data = self.transform(new_data)
@@ -230,59 +219,15 @@ def top_accuracy(output, target, topk=(1,)):
             res.append(correct_k)
         return res
 
+def compute_loss(target, target_p, predict, loss_mask):
+    out_head = head_engine(predict)
+    out_logp = nn.LogSoftmax(dim=2)(out_head)
+    plogp = target_p * out_logp
+    ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.shape[0] * loss_mask.shape[1])
+    vloss = criterion(predict, target.to(rank))
+    vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.shape[0] * loss_mask.shape[1])
+    return vloss, ploss, out_head
 
-@torch.no_grad()
-def getkacc(model, data, max_length=5):
-    hidden_states = data["hidden_states"].half().to(rank)
-    input_ids = data["input_ids"].to(rank)
-    # attention_mask=data["attention_mask"]
-    loss_mask = data["loss_mask"].to(rank)
-    # sample_mask=data["sample_mask"]
-    target = data["target"].half().to(rank)
-    total = [0 for _ in range(max_length)]
-    correct = [0 for _ in range(max_length)]
-    bs, sl = hidden_states.shape[0], hidden_states.shape[1]
-    target_headout = head_engine(target)
-    hidden_states_headout = head_engine(hidden_states)
-
-    for i in range(bs):
-        for j in range(sl):
-
-            single_hidden_states = hidden_states[i, :j]
-            single_hidden_states = single_hidden_states.half()
-            single_input_ids = input_ids[i, :j]
-
-            single_hidden_states = single_hidden_states[None, :, :]
-            single_input_ids = single_input_ids[None, :]
-            for k in range(max_length):
-                if loss_mask[i, single_hidden_states.shape[1] - 1] == 0:
-                    break
-                tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
-                tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
-                target_in_token = torch.argmax(tmp_in_target_headout)
-                target_out_token = torch.argmax(tmp_out_target_headout)
-                tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
-                # tmp_sample_mask=sample_mask[i,single_hidden_states.shape[1]-1]
-                if not (target_in_token == tmp_token):
-                    break
-                out_hidden = model(single_hidden_states, input_ids=single_input_ids)
-                last_hidden = out_hidden[:, -1]
-                last_headout = head_engine(last_hidden)
-                token = torch.argmax(last_headout)
-                total[k] += 1
-                if token == target_out_token:
-                    correct[k] += 1
-                else:
-                    for kk in range(k + 1, max_length):
-                        total[kk] += 1
-                    break
-
-                single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
-                single_input_ids = torch.cat((single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)),
-                                             dim=1)
-
-    acc = [correct[i] / (total[i] + 1e-5) for i in range(len(correct))]
-    return acc
 
 
 if train_config["data_noise"]:
@@ -297,15 +242,11 @@ datapath = list_files(train_config["datapath"])
 
 traindatapath = datapath[:int(len(datapath) * 0.95)]
 testdatapath = datapath[int(len(datapath) * 0.95):]
-# print('td',train_config["datapath"])
-# print(datapath)
-# exit()
 traindataset = CustomDataset(traindatapath, transform=aug)
 testdataset = CustomDataset(testdatapath)
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], shuffle=False,
                          collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"], pin_memory=True)
-# for batch_data in train_loader:
-#     print(batch_data)
+
 
 if rank == 0:
     if not os.path.exists(args.cpdir):
@@ -335,13 +276,6 @@ head_engine, _, test_loader, _ = deepspeed.initialize(args=args,
                                                       collate_fn=DataCollatorWithPadding()
                                                       )
 
-# head_engine, _, _, _ = deepspeed.initialize(args=args,
-#                                             model=head,
-#                                             model_parameters=head.parameters(),
-#                                             )
-# test_loader = accelerator.prepare(
-#     test_loader
-# )
 
 for param in head.parameters():
     param.requires_grad = False
@@ -363,14 +297,9 @@ for epoch in range(num_epochs):
             target_head = head_engine(data["target"].to(rank))
             target_p = nn.Softmax(dim=2)(target_head)
             target_p = target_p.detach()
-        # print(data["hidden_states"].shape)
-        out_head = head_engine(predict)
-        out_logp = nn.LogSoftmax(dim=2)(out_head)
+
         loss_mask = data["loss_mask"][:, :, None].to(rank)
-        plogp = target_p * out_logp
-        ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.shape[0] * loss_mask.shape[1])
-        vloss = criterion(predict, data["target"].to(rank))
-        vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.shape[0] * loss_mask.shape[1])
+        vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask)
         loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
         # loss.backward()
         model_engine.backward(loss)
@@ -416,72 +345,6 @@ for epoch in range(num_epochs):
         print('Train Accuracy: {:.2f}%'.format(100 * correct / (total + 1e-5)))
         wandb.log({"train/epochacc": correct / (total + 1e-5), "train/epochloss": epoch_loss})
 
-    top_3acc = [0 for _ in range(3)]
-    correct = 0
-    total = 0
-    epoch_loss = 0
-    num_batches = 0
-
-    k_acc = [[] for i in range(5)]
-    for batch_idx, data in enumerate(test_loader):
-        with torch.no_grad():
-            if batch_idx < 5:
-                acces = getkacc(model, data, max_length=5)
-                for i in range(len(acces)):
-                    k_acc[i].append(acces[i])
-            predict = model(data["hidden_states"].half().to(rank), input_ids=data["input_ids"].to(rank),
-                            attention_mask=data["attention_mask"].half().to(rank))
-            target_head = head_engine(data["target"].half().to(rank))
-            target_p = nn.Softmax(dim=2)(target_head)
-            target_p = target_p.detach()
-            out_head = head_engine(predict)
-            out_logp = nn.LogSoftmax(dim=2)(out_head)
-            loss_mask = data["loss_mask"][:, :, None].half().to(rank)
-            plogp = target_p * out_logp
-            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / loss_mask.sum()
-            vloss = criterion(predict, data["target"].half().to(rank))
-            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / loss_mask.sum()
-            loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
-            _, predicted = torch.max(out_head, 2)
-            _, target = torch.max(target_head, 2)
-            ct = loss_mask.sum().item()
-            cc = ((predicted == target) * loss_mask.squeeze()).sum().item()
-            out_head = out_head.view(-1, target_head.shape[-1])[loss_mask.view(-1) == 1]
-            target = target.view(-1)[loss_mask.view(-1) == 1]
-            topkacc = top_accuracy(out_head, target, (1, 2, 3))
-            for top_i in range(len(topkacc)):
-                top_3acc[top_i] += topkacc[top_i]
-            total += ct
-            correct += cc
-        epoch_loss += loss.item()
-        num_batches += 1
-        del ploss, vloss
-        break
-
-    mean_acces = []
-    for id, i in enumerate(k_acc):
-        mean_acc = np.array(i).mean()
-        mean_acc = torch.tensor(mean_acc).cuda()
-        mean_acces.append(mean_acc)
-
-    mean_acces = accelerator.gather_for_metrics(mean_acces)
-    if accelerator.is_local_main_process:
-        for id, i in enumerate(mean_acces):
-            mean_acc = i.mean().item()
-            wandb.log({f"test/{id}_acc": mean_acc})
-
-    correct, total = torch.tensor(correct).cuda(), torch.tensor(total).cuda()
-    correct, total = accelerator.gather_for_metrics((correct, total))
-    correct, total = correct.sum().item(), total.sum().item()
-    top_3acc = accelerator.gather_for_metrics(top_3acc)
-    if accelerator.is_local_main_process:
-        for id, i in enumerate(top_3acc):
-            wandb.log({f'test/top_{id + 1}_acc': i.sum().item() / (total + 1e-5)})
-    epoch_loss /= num_batches
-    if accelerator.is_local_main_process:
-        print('Test Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, num_epochs, epoch_loss))
-        print('Test Accuracy: {:.2f}%'.format(100 * correct / (total + 1e-5)))
-        wandb.log({"test/epochacc": correct / (total + 1e-5), "test/epochloss": epoch_loss})
     model_engine.save_16bit_model(f"{args.cpdir}/state_{epoch}")
     if epoch % 10 == 0:
         deepspeed.DeepSpeedEngine.save_checkpoint(model_engine, save_dir=f"{args.cpdir}/state_{epoch}")
