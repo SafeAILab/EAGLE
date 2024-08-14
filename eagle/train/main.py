@@ -7,7 +7,6 @@ parser.add_argument('--lr', type=float, default=3e-5)
 parser.add_argument('--bs', type=int, default=4)
 parser.add_argument('--gradient-accumulation-steps', type=int, default=1)
 parser.add_argument('--tmpdir', type=str, default='0')
-parser.add_argument('--outdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
 args = parser.parse_args()
 
@@ -148,10 +147,6 @@ class CustomDataset(Dataset):
         input_ids = data['input_ids'][:train_config["max_len"]][None, :]
         loss_mask = data["loss_mask"][:train_config["max_len"]][None, :]
 
-        # except:
-        #     with open("error_path.txt", "w") as file:
-        #         file.write(self.data[index])
-        #     print('error path',self.data[index])
 
         length = hidden_state.shape[1]
         # length_q = data['query_ids'].shape[1]
@@ -172,9 +167,7 @@ class CustomDataset(Dataset):
         new_data["target"] = target
         new_data["hidden_state_big"] = hidden_state
         new_data["input_ids"] = input_ids_target
-        # sample = torch.cat((data['xs'],data['xb']))
-        # sample=torch.cat((self.data[index]['x'],self.data[index]['logits']))
-        # label = data['y']
+
 
         if self.transform:
             new_data = self.transform(new_data)
@@ -235,10 +228,17 @@ def top_accuracy(output, target, topk=(1,)):
             res.append(correct_k)
         return res
 
+def compute_loss(target, target_p, predict, loss_mask):
+    out_head = head(predict)
+    out_logp = nn.LogSoftmax(dim=2)(out_head)
+    plogp = target_p * out_logp
+    ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum() + 1e-5)
+    vloss = criterion(predict, target)
+    vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum() + 1e-5)
+    return vloss, ploss, out_head
 
 @torch.no_grad()
 def getkacc(model, data, head, max_length=5):
-    
     def generate(hidden_states, input_ids, head, max_length=4, use_cache=True):
         if use_cache:
             past_key_values = None
@@ -305,9 +305,7 @@ datapath = list_files(train_config["datapath"])
 
 traindatapath = datapath[:int(len(datapath) * 0.95)]
 testdatapath = datapath[int(len(datapath) * 0.95):]
-# print('td',train_config["datapath"])
-# print(datapath)
-# exit()
+
 traindataset = CustomDataset(traindatapath, transform=aug)
 testdataset = CustomDataset(testdatapath)
 train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=True,
@@ -315,8 +313,6 @@ train_loader = DataLoader(traindataset, batch_size=train_config["bs"], shuffle=T
                           pin_memory=True)
 test_loader = DataLoader(testdataset, batch_size=train_config["bs"], shuffle=False,
                          collate_fn=DataCollatorWithPadding(), num_workers=train_config["num_workers"], pin_memory=True)
-# for batch_data in train_loader:
-#     print(batch_data)
 
 if accelerator.is_main_process:
     if not os.path.exists(args.cpdir):
@@ -361,13 +357,8 @@ for epoch in range(num_epochs + 1):
                 target_head = head(data["target"])
                 target_p = nn.Softmax(dim=2)(target_head)
                 target_p = target_p.detach()
-            out_head = head(predict)
-            out_logp = nn.LogSoftmax(dim=2)(out_head)
             loss_mask = data["loss_mask"][:, :, None]
-            plogp = target_p * out_logp
-            ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum()+1e-5)
-            vloss = criterion(predict, data["target"])
-            vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum()+1e-5)
+            vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             # loss.backward()
             accelerator.backward(loss)
@@ -375,8 +366,6 @@ for epoch in range(num_epochs + 1):
             optimizer.step()
             if is_warmup:
                 scheduler.step()
-
-        
 
         with torch.no_grad():
             _, predicted = torch.max(out_head, 2)
@@ -436,13 +425,8 @@ for epoch in range(num_epochs + 1):
                 target_head = head(data["target"])
                 target_p = nn.Softmax(dim=2)(target_head)
                 target_p = target_p.detach()
-                out_head = head(predict)
-                out_logp = nn.LogSoftmax(dim=2)(out_head)
                 loss_mask = data["loss_mask"][:, :, None]
-                plogp = target_p * out_logp
-                ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum()+1e-5)
-                vloss = criterion(predict, data["target"])
-                vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum()+1e-5)
+                vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask)
                 loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
                 _, predicted = torch.max(out_head, 2)
                 _, target = torch.max(target_head, 2)
@@ -482,7 +466,4 @@ for epoch in range(num_epochs + 1):
             print('Test Epoch [{}/{}], Loss: {:.4f}'.format(epoch + 1, num_epochs, epoch_loss))
             print('Test Accuracy: {:.2f}%'.format(100 * correct / total))
             wandb.log({"test/epochacc": correct / total, "test/epochloss": epoch_loss})
-            # accelerator.save_model(model, f"checkpoints/model_{epoch}")
-            # accelerator.save_state(output_dir=f"{args.outdir}/state_{epoch}")
-            # os.system(f"cp -r {args.outdir} {args.cpdir}")
             accelerator.save_state(output_dir=f"{args.cpdir}/state_{epoch}")
