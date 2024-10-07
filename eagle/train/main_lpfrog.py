@@ -402,6 +402,9 @@ for epoch in range(num_epochs + 1):
             loss_mask = data["loss_mask"][:, :, None]
             vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask,head)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
+            del ploss, vloss, target_p, predict
+            ori_device = loss.device
+            full_device = "cpu"
             # loss.backward()
             accelerator.backward(loss)
             accelerator.clip_grad_value_(model.parameters(), train_config["grad_clip"])
@@ -422,15 +425,18 @@ for epoch in range(num_epochs + 1):
             total += ct
             correct += cc
         if accelerator.is_main_process and ct != 0:
-            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"], "train/vloss": vloss.item(),
-                       "train/ploss": ploss.item(), "train/loss": loss.item(), "train/acc": cc / ct}
+            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"], 
+                    #    "train/vloss": vloss.item(),
+                    #    "train/ploss": ploss.item(), 
+                       "train/loss": loss.item(), 
+                       "train/acc": cc / ct}
             for id, i in enumerate(top_3acc):
                 logdict[f'train/top_{id + 1}_acc'] = topkacc[id].item() / ct
             wandb.log(logdict)
             # for id,i in enumerate(top_3acc):
             #     wandb.log({f'train/top_{id+1}_acc':topkacc[id].item()/ct})
 
-        del ploss, vloss
+        # del ploss, vloss
         epoch_loss += loss.item()
         num_batches += 1
 
