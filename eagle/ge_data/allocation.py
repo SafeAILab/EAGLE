@@ -55,8 +55,8 @@ for i in range(num_p):
     gpu_index = gpus[i]
     gpu_index_str = ' '.join(map(str, gpu_index))
     # gpu_index_str='['+gpu_index_str+']'
-    command = "python ge_data_all_vicuna.py --start={} --end={} --index={} --gpu_index {} --outdir {}".format(start, end, index,
-                                                                                                gpu_index_str, outdir)
+    command = "nohup python ./eagle/ge_data/ge_data_all_llama3.py --start={} --end={} --index={} --gpu_index {} --outdir {} > getdata{}.log 2>&1 &".format(start, end, index,
+                                                                                                gpu_index_str, outdir, index)
     commands.append(command)
 # run_command(commands[0])
 # commands=commands[:1]

@@ -16,7 +16,7 @@ from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 
-from .cnets import Model
+from .cnets import Model,ModelLpfrog
 from .configs import EConfig
 
 
@@ -68,6 +68,7 @@ class EaModel(nn.Module):
         self.ea_layer.load_state_dict(ea_layer_state_dict, strict=True)
         self.ea_layer.to(self.base_model.dtype).to(device)
         self.ea_layer.init_tree()
+        # self.ea_layer.init_tree()#倍数变多了
 
     def get_tokenizer(self):
         """Get the tokenizer of the base model.

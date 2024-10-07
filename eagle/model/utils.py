@@ -230,7 +230,7 @@ def initialize_tree0(input_ids, model, past_key_values, logits_processor):
     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, logits, hidden_state, sample_token
 
 def initialize_tree(input_ids, model, past_key_values, logits_processor):
-    outputs, orig, hidden_states = model(
+    outputs, orig, hidden_states = model(#hidden_states is f0
         input_ids, past_key_values=past_key_values, output_orig=True
     )
 

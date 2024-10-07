@@ -16,8 +16,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 
 
-bigname = "/home/lyh/weights/hf/llama3chat/8B/"
-#bigname = "/home/lyh/weights/hf/llama2chat/7B/"
+# bigname = "/home/lyh/weights/hf/llama3chat/8B/"
+bigname = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 
 
@@ -39,7 +39,8 @@ def build_dataset_rank(
         tokenizer, split="train",
         select=None,
 ):
-    ds = load_dataset('json', data_files="/home/lyh/data/hf/Shargpt/ShareGPT_V4.3_unfiltered_cleaned_split.json")
+    # ds = load_dataset('json', data_files="/home/lyh/data/hf/Shargpt/ShareGPT_V4.3_unfiltered_cleaned_split.json")
+    ds = load_dataset("Aeala/ShareGPT_Vicuna_unfiltered")
     ds = ds['train']
     ds = ds.shuffle(seed=42)
     ds1 = ds.select(range(args.start, args.end))
@@ -217,5 +218,7 @@ for id,data in enumerate(ds):
         print("")
     outdata = ge(data)
     writedata(outdir,outdata)
+    
+print("It over, heart broken and than do what?")
 
 

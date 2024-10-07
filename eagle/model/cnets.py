@@ -882,6 +882,1753 @@ class Model(nn.Module):
         acc = [correct[i] / total[i] for i in range(len(correct))]
         return acc
 
+class Model_caption(nn.Module):
+    def __init__(self, config, load_emb=False, path=None, bias=True, total_tokens=63, depth=5, top_k=8, threshold=1.0):
+        super().__init__()
+
+        self.gradient_checkpointing = True
+        self.padding_idx = config.pad_token_id
+        self.vocab_size = config.vocab_size
+
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        if load_emb:
+            from safetensors import safe_open
+            import json
+            try:
+                with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                with safe_open(os.path.join(path, emb_path),
+                               framework="pt",
+                               device="cpu") as f:
+                    tensor_slice = f.get_slice("model.embed_tokens.weight")
+                    vocab_size, hidden_dim = tensor_slice.get_shape()
+                    tensor = tensor_slice[:, :hidden_dim].float()
+            except:
+                with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                weights = torch.load(os.path.join(path, emb_path))
+                tensor = weights["model.embed_tokens.weight"].float()
+            self.embed_tokens.weight.data = tensor
+
+        self.top_k = top_k
+        self.total_tokens = total_tokens - 1
+        self.depth = depth
+        self.threshold = math.log(threshold)
+        # print("total_tokens",total_tokens)
+        # print("depth",depth)
+        # print("top_k",top_k)
+        # print("threshold",threshold)
+
+        self.layers = nn.ModuleList([LlamaDecoderLayer(config, index) for index in range(config.num_hidden_layers)])
+        self.fc = nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias)
+        self.act = ACT2FN[config.hidden_act]
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def init_tree(self):
+        self.tree_mask_init = torch.eye(self.top_k, device=self.embed_tokens.weight.device)[None, None]
+        self.position_ids = torch.zeros(self.top_k, device=self.embed_tokens.weight.device, dtype=torch.long)
+        self.tree_mask_init = self.tree_mask_init.to(self.embed_tokens.weight.device)
+
+    def reset(self):
+        self.tree_mask = None
+
+    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
+        # create causal mask
+        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = _make_causal_mask(
+                input_shape,
+                # inputs_embeds.dtype,
+                torch.float32,  # [MODIFIED] force to cast to float32
+                device=inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+
+        if attention_mask is not None:
+            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+            expanded_attn_mask = _expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(
+                inputs_embeds.device
+            )
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+
+        # [MODIFIED] add tree mask
+        if hasattr(self, "tree_mask") and self.tree_mask is not None:
+            tree_mask = self.tree_mask
+            _, _, tree_shape0, tree_shape1 = tree_mask.shape
+            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:][
+                tree_mask == 0
+                ] = torch.finfo(torch.float32).min
+
+        return combined_attention_mask
+
+    def forward(
+            self,
+            hidden_states,
+            input_ids,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            std=None
+    ):
+        batch_size, seq_length, _ = hidden_states.shape
+        seq_length_with_past = seq_length
+        past_key_values_length = 0
+
+        with torch.no_grad():
+            inputs_embeds = self.embed_tokens(input_ids)
+            # inputs_embeds = inputs_embeds.detach()
+
+        # if std is not None:
+        #     noise = torch.randn(inputs_embeds.size(),device=inputs_embeds.device) * std
+        #     inputs_embeds=inputs_embeds+noise
+
+        if past_key_values is not None:
+            past_key_values_length = past_key_values[0][0].shape[2]
+            seq_length_with_past = seq_length_with_past + past_key_values_length
+        if position_ids is None:
+            device = hidden_states.device if hidden_states is not None else inputs_embeds.device
+            position_ids = torch.arange(
+                past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
+            )
+            position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
+        else:
+            position_ids = position_ids.view(-1, seq_length).long()
+
+        #position_ids=position_ids//4
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                (batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device
+            )
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length
+        )
+
+        # if self.gradient_checkpointing and self.training:
+        #    if use_cache:
+        #        use_cache = False
+
+        # hidden_states=self.act(self.fc(torch.cat((inputs_embeds,hidden_states),dim=-1)))
+        inputs_embeds = inputs_embeds.to(torch.float32)
+        # hidden_states = inputs_embeds.to(inputs_embeds.dtype)
+        # inputs_embeds = inputs_embeds.to(hidden_states.dtype)#torch.float32
+        #在这改,将cat是对的,但是隐藏层需要有俩种cat的方式
+        
+        if inputs_embeds.dtype != hidden_states.dtype:
+            print("Dtype must be same!!")
+        hidden_states = self.fc(torch.cat((inputs_embeds, hidden_states), dim=-1))#经过一层fc层
+
+        all_hidden_states = () if output_hidden_states else None
+        next_decoder_cache = () if use_cache else None
+
+        for idx, decoder_layer in enumerate(self.layers):
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
+
+            past_key_value = past_key_values[idx] if past_key_values is not None else None
+            #经过decoder层
+            if self.gradient_checkpointing and self.training:
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return module(*inputs, past_key_value, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(decoder_layer),
+                    hidden_states,
+                    attention_mask,
+                    position_ids,
+                )
+            else:
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                )
+
+            hidden_states = layer_outputs[0]
+
+            if use_cache:
+                next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
+
+        if use_cache:
+            return hidden_states, next_decoder_cache
+
+        return hidden_states
+
+    def reset_kv(self):
+        self.stable_kv = None
+
+    @torch.no_grad()
+    def topK_genrate0(self, hidden_states, input_ids, head, logits_processor):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens
+        depth = self.depth
+        top_k = self.top_k
+
+        sample_token = input_ids[:, -1]
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+
+        input_ids = input_ids[:, 1:]
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]
+        self.reset()
+
+        # with Timer("draft many"):
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        self.stable_kv = past_key_values
+        last_hidden = out_hidden[:, -1]
+
+        last_headout = head(last_hidden)
+
+        last_p = self.logsoftmax(last_headout)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values
+        scores = topk_p[0]
+        scores_list.append(scores[None])
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        ss_token.append(topk_index)
+        input_ids = topk_index
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        tree_mask = self.tree_mask_init
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+
+        # 4
+        for i in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids
+            # with Timer("draft one"):
+            out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            len_posi += 1
+
+            # with Timer("sort1"):
+            bias1 = top_k if i > 0 else 0
+            bias2 = max(0, i - 1)
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)
+            parents_list.append(parents)
+
+            last_headout = head(out_hidden[0])
+            last_p = self.logsoftmax(last_headout)
+
+            top = torch.topk(last_p, top_k, dim=-1)
+            topk_index, topk_p = top.indices, top.values
+
+            cu_scores = topk_p + scores[:, None]
+
+            topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)
+            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
+            scores = topk_cs_p
+
+            out_ids = topk_cs_index // top_k
+            input_hidden = out_hidden[:, out_ids]
+            # with Timer("2index"):
+            #     in_ids = topk_cs_index % top_k
+            #     input_ids = topk_index[out_ids, in_ids][None]
+            # with Timer("1index"):
+            input_ids = topk_index.view(-1)[topk_cs_index][None]
+            # print(input_ids.equal(input_ids0))
+
+            ss_token.append(topk_index)
+            scores_list.append(cu_scores)
+            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
+
+            # if self.threshold < 0 and cu_scores.max() < self.threshold:
+            #     break
+
+        # del parents_list,scores_list,ss_token
+        # return draft_tokens, mask_index,tree_mask,tree_position_ids
+
+        # with Timer("post"):
+
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # with Timer("mask"):
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        # with Timer("mask1"):
+        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
+        #     tree_mask0[0][0] = True
+        #     for i in range(total_tokens):
+        #         #tree_mask0[i + 1][0]=True
+        #         tree_mask0[i + 1][i + 1] = True
+        #         p=mask_index_list[i]
+        #         tree_mask0[i + 1][p] = True
+        #         while p:
+        #             p=mask_index_list[p-1]
+        #             tree_mask0[i + 1][p] = True
+        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
+        #
+        # print(tree_mask0.equal(tree_mask))
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens#整棵树的数量
+        depth = self.depth#默认构造结构深度为5的树，就是最多Forward 5次
+        top_k = self.top_k#默认是10，默认扩展10个节点
+
+        sample_token = input_ids[:, -1]#倒着采样一个，取LLM的token
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+        topk_cs_index_list = []#点位
+        
+        input_ids = input_ids[:, 1:]#这步是为了构造形状吗？不是的，input有个上下文token窗口
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]#40
+        self.reset()#将树mask设置为空，就是理论上也不会有的
+
+        # with Timer("draft many"): hidden_states=, input_ids=
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            topk_cs_index_list.append(0)
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)#使用hidden层，过一遍草稿模型,得到t+2时刻的隐藏层
+        self.stable_kv = past_key_values
+        last_hidden = out_hidden[:, -1]#取隐藏层最后一个feature，out_hidden=torch.Size([1, 40, 4096]) last_hidden=torch.Size([1, 4096])
+
+        last_headout = head(last_hidden)#last_headout=torch.Size([1, 32000])
+
+        last_p = self.logsoftmax(last_headout)#softmax了一下
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values#只有10个在这里
+        scores = topk_p[0]#torch.Size([1, 10])_>torch.Size([10])
+        scores_list.append(scores[None])#升高维度了,又变会topk_p
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))#0节点载入了
+        ss_token.append(topk_index)#在last_headout的index
+        input_ids = topk_index#获取概率的索引值，原来这个索引值，就是token是什么，也是后面算embedding的东西
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)#torch.Size([1, 10, 4096])一列复制10topk遍,batchsize到时候给10个id合在一起
+        tree_mask = self.tree_mask_init#初始化单位矩阵
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)#0~9的整数
+        
+        # 4
+        for i in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids#len_posi是input的token数,self.position_ids为10size的数组0矩阵，position_ids数组全是len_posi
+            # with Timer("draft one"): input_hidden：torch.Size([1, 10, 4096]) input_ids：torch.Size([1, 10])
+            out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            len_posi += 1#整体的位置+1
+
+            # with Timer("sort1"):
+            bias1 = top_k if i > 0 else 0#如果不是第一次跑,就没有这个
+            bias2 = max(0, i - 1)#选择最大的那个
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)#整棵树的相对位置
+            parents_list.append(parents)
+            topk_cs_index_list.append(parents)
+
+            last_headout = head(out_hidden[0])#last_headout=torch.Size([1, 32000]) out_hidden[0]=torch.Size([10, 4096])
+            last_p = self.logsoftmax(last_headout)#torch.Size([10, 32000])
+
+            top = torch.topk(last_p, top_k, dim=-1)#对每行取个topk
+            topk_index, topk_p = top.indices, top.values#这里是选取点
+
+            cu_scores = topk_p + scores[:, None]#为什么要加起来？我知道现在每个节点的分数都在这，因为是log算法，直接加就行
+
+            topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)#cu_scores里面本来就是每k个节点循环一次
+            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values#topk_cs_index,可以知道是第几个节点的topk
+            scores = topk_cs_p
+            #做父节点定位,寻找到特定的f
+            out_ids = topk_cs_index // top_k#取其商，定位在top里的当前节点位置，以便取其隐藏层
+            input_hidden = out_hidden[:, out_ids]#因为输出的只有
+            # with Timer("2index"):
+            #     in_ids = topk_cs_index % top_k
+            #     input_ids = topk_index[out_ids, in_ids][None]
+            # with Timer("1index"):
+            input_ids = topk_index.view(-1)[topk_cs_index][None]#topk_index依旧存的是索引，所以也是展开
+            #topk_cs_index取余就第几个节点的子节点, 取商就是在节点的第几个位置
+            # print(input_ids.equal(input_ids0))
+
+            ss_token.append(topk_index)#每轮的token值
+            scores_list.append(cu_scores)#每轮的scores表
+            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)#torch.Size([1, 1, 10, 20])
+
+            # if self.threshold < 0 and cu_scores.max() < self.threshold:
+            #     break
+
+        # del parents_list,scores_list,ss_token
+        # return draft_tokens, mask_index,tree_mask,tree_position_ids
+
+        # with Timer("post"):
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        #parents_list里面填的是整棵树的相对位置,top_scores_index// top_k看起来是第几层的信息
+        #不要被迷惑了,这层就是获得相对位置,top_scores_index就是那颗完整的树
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)#除了叶节点,其余节点在整个树的位置
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # with Timer("mask"):
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        # with Timer("mask1"):
+        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
+        #     tree_mask0[0][0] = True
+        #     for i in range(total_tokens):
+        #         #tree_mask0[i + 1][0]=True
+        #         tree_mask0[i + 1][i + 1] = True
+        #         p=mask_index_list[i]
+        #         tree_mask0[i + 1][p] = True
+        #         while p:
+        #             p=mask_index_list[p-1]
+        #             tree_mask0[i + 1][p] = True
+        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
+        #
+        # print(tree_mask0.equal(tree_mask))
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+        #draft_tokens=torch.Size([1, 60]),retrieve_indices=torch.Size([20, 7]), torch.Size([1, 1, 60, 60]),torch.Size([60])
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
+    def acc(self, data, head, max_length=5):
+        hidden_states = data["hidden_states"]
+        input_ids = data["input_ids"]
+        # attention_mask=data["attention_mask"]
+        loss_mask = data["loss_mask"]
+        sample_mask = data["sample_mask"]
+        target = data["target"]
+        total = [0 for _ in range(max_length)]
+        correct = [0 for _ in range(max_length)]
+        bs, sl = hidden_states.shape[0], hidden_states.shape[1]
+        target_headout = head(target)
+        hidden_states_headout = head(hidden_states)
+
+        for i in range(bs):
+            for j in range(sl):
+                if loss_mask[i, j] == 0:
+                    continue
+                single_hidden_states = hidden_states[i, :j]
+                single_input_ids = input_ids[i, :j]
+
+                single_hidden_states = single_hidden_states[None, :, :]
+                single_input_ids = single_input_ids[None, :]
+                for k in range(max_length):
+                    tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
+                    tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
+                    target_in_token = torch.argmax(tmp_in_target_headout)
+                    target_out_token = torch.argmax(tmp_out_target_headout)
+                    tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
+                    tmp_sample_mask = sample_mask[i, single_hidden_states.shape[1] - 1]
+                    if not (target_in_token == tmp_token):
+                        break
+                    out_hidden = self(single_hidden_states, input_ids=single_input_ids)
+                    last_hidden = out_hidden[:, -1]
+                    last_headout = head(last_hidden)
+                    token = torch.argmax(last_headout)
+                    total[k] += 1
+                    if token == target_out_token:
+                        correct[k] += 1
+                    else:
+                        for kk in range(k, max_length):
+                            total[kk] += 1
+                        break
+
+                    single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
+                    single_input_ids = torch.cat(
+                        (single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)), dim=1)
+
+        acc = [correct[i] / total[i] for i in range(len(correct))]
+        return acc
+
+class ModelLpfrog(nn.Module):
+    def __init__(self, config, load_emb=False, path=None, bias=True, total_tokens=63, depth=5, top_k=8, threshold=1.0):
+        super().__init__()
+
+        self.gradient_checkpointing = True
+        self.padding_idx = config.pad_token_id
+        self.vocab_size = config.vocab_size
+
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        if load_emb:
+            from safetensors import safe_open
+            import json
+            try:
+                with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                with safe_open(os.path.join(path, emb_path),
+                               framework="pt",
+                               device="cpu") as f:
+                    tensor_slice = f.get_slice("model.embed_tokens.weight")
+                    vocab_size, hidden_dim = tensor_slice.get_shape()
+                    tensor = tensor_slice[:, :hidden_dim].float()
+            except:
+                with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                weights = torch.load(os.path.join(path, emb_path))
+                tensor = weights["model.embed_tokens.weight"].float()
+            self.embed_tokens.weight.data = tensor
+
+        self.top_k = top_k
+        self.total_tokens = total_tokens - 1
+        self.depth = depth
+        self.threshold = math.log(threshold)
+        # print("total_tokens",total_tokens)
+        # print("depth",depth)
+        # print("top_k",top_k)
+        # print("threshold",threshold)
+
+        self.layers = nn.ModuleList([LlamaDecoderLayer(config, index) for index in range(config.num_hidden_layers)])
+        self.fc = nn.Linear(4 * config.hidden_size, config.hidden_size, bias=bias)
+        self.act = ACT2FN[config.hidden_act]
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def init_tree(self):
+        self.tree_mask_init = torch.eye(self.top_k, device=self.embed_tokens.weight.device)[None, None]
+        self.position_ids = torch.zeros(self.top_k, device=self.embed_tokens.weight.device, dtype=torch.long)
+        self.tree_mask_init = self.tree_mask_init.to(self.embed_tokens.weight.device)
+
+    def reset(self):
+        self.tree_mask = None
+
+    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
+        # create causal mask
+        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = _make_causal_mask(
+                input_shape,
+                # inputs_embeds.dtype,
+                torch.float32,  # [MODIFIED] force to cast to float32
+                device=inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+
+        if attention_mask is not None:
+            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+            expanded_attn_mask = _expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(
+                inputs_embeds.device
+            )
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+
+        # [MODIFIED] add tree mask
+        if hasattr(self, "tree_mask") and self.tree_mask is not None:
+            tree_mask = self.tree_mask
+            _, _, tree_shape0, tree_shape1 = tree_mask.shape
+            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:][
+                tree_mask == 0
+                ] = torch.finfo(torch.float32).min
+
+        return combined_attention_mask
+
+    def forward(
+            self,
+            hidden_states,
+            input_ids,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            std=None
+    ):
+        batch_size, seq_length, _ = hidden_states.shape
+        seq_length_with_past = seq_length
+        past_key_values_length = 0
+
+        with torch.no_grad():
+            inputs_embeds = self.embed_tokens(input_ids)
+            # inputs_embeds = inputs_embeds.detach()
+
+        # if std is not None:
+        #     noise = torch.randn(inputs_embeds.size(),device=inputs_embeds.device) * std
+        #     inputs_embeds=inputs_embeds+noise
+
+        if past_key_values is not None:
+            past_key_values_length = past_key_values[0][0].shape[2]
+            seq_length_with_past = seq_length_with_past + past_key_values_length
+        if position_ids is None:
+            device = hidden_states.device if hidden_states is not None else inputs_embeds.device
+            position_ids = torch.arange(
+                past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
+            )
+            position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
+            position_ids += 1
+        else:
+            position_ids = position_ids.view(-1, seq_length).long()
+
+        #because it predict t+2 feature, so position should be added one.
+        position_ids += 1
+        #position_ids=position_ids//4
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                (batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device
+            )
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length
+        )
+
+        # if self.gradient_checkpointing and self.training:
+        #    if use_cache:
+        #        use_cache = False
+
+        # hidden_states=self.act(self.fc(torch.cat((inputs_embeds,hidden_states),dim=-1)))
+        inputs_embeds = inputs_embeds.to(hidden_states.dtype)
+        #在这改,将cat是对的,但是隐藏层需要有俩种cat的方式
+        
+        h1 = torch.cat((inputs_embeds, hidden_states),dim=-1)
+        #change to  4 -> 1 , so change it 
+        hidden_states = self.fc(torch.cat((h1, h1)), dim=-1)#经过一层fc层
+
+        all_hidden_states = () if output_hidden_states else None
+        next_decoder_cache = () if use_cache else None
+
+        for idx, decoder_layer in enumerate(self.layers):
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
+
+            past_key_value = past_key_values[idx] if past_key_values is not None else None
+            #经过decoder层
+            if self.gradient_checkpointing and self.training:
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return module(*inputs, past_key_value, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(decoder_layer),
+                    hidden_states,
+                    attention_mask,
+                    position_ids,
+                )
+            else:
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                )
+
+            hidden_states = layer_outputs[0]
+
+            if use_cache:
+                next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
+
+        if use_cache:
+            return hidden_states, next_decoder_cache
+
+        return hidden_states
+
+    def reset_kv(self):
+        self.stable_kv = None
+
+    @torch.no_grad()
+    def topK_genrate0(self, hidden_states, input_ids, head, logits_processor):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens
+        depth = self.depth
+        top_k = self.top_k
+
+        sample_token = input_ids[:, -1]
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+
+        input_ids = input_ids[:, 1:]
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]
+        self.reset()
+
+        # with Timer("draft many"):
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        self.stable_kv = past_key_values
+        last_hidden = out_hidden[:, -1]
+
+        last_headout = head(last_hidden)
+
+        last_p = self.logsoftmax(last_headout)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values
+        scores = topk_p[0]
+        scores_list.append(scores[None])
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        ss_token.append(topk_index)
+        input_ids = topk_index
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        tree_mask = self.tree_mask_init
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+
+        # 4
+        for i in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids
+            # with Timer("draft one"):
+            out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            len_posi += 1
+
+            # with Timer("sort1"):
+            bias1 = top_k if i > 0 else 0
+            bias2 = max(0, i - 1)
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)
+            parents_list.append(parents)
+
+            last_headout = head(out_hidden[0])
+            last_p = self.logsoftmax(last_headout)
+
+            top = torch.topk(last_p, top_k, dim=-1)
+            topk_index, topk_p = top.indices, top.values
+
+            cu_scores = topk_p + scores[:, None]
+
+            topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)
+            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
+            scores = topk_cs_p
+
+            out_ids = topk_cs_index // top_k
+            input_hidden = out_hidden[:, out_ids]
+            # with Timer("2index"):
+            #     in_ids = topk_cs_index % top_k
+            #     input_ids = topk_index[out_ids, in_ids][None]
+            # with Timer("1index"):
+            input_ids = topk_index.view(-1)[topk_cs_index][None]
+            # print(input_ids.equal(input_ids0))
+
+            ss_token.append(topk_index)
+            scores_list.append(cu_scores)
+            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
+
+            # if self.threshold < 0 and cu_scores.max() < self.threshold:
+            #     break
+
+        # del parents_list,scores_list,ss_token
+        # return draft_tokens, mask_index,tree_mask,tree_position_ids
+
+        # with Timer("post"):
+
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # with Timer("mask"):
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        # with Timer("mask1"):
+        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
+        #     tree_mask0[0][0] = True
+        #     for i in range(total_tokens):
+        #         #tree_mask0[i + 1][0]=True
+        #         tree_mask0[i + 1][i + 1] = True
+        #         p=mask_index_list[i]
+        #         tree_mask0[i + 1][p] = True
+        #         while p:
+        #             p=mask_index_list[p-1]
+        #             tree_mask0[i + 1][p] = True
+        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
+        #
+        # print(tree_mask0.equal(tree_mask))
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens#整棵树的数量
+        depth = self.depth#默认构造结构深度为5的树，就是最多Forward 5次
+        top_k = self.top_k#默认是10，默认扩展10个节点
+
+        sample_token = input_ids[:, -1]#倒着采样一个，取LLM的token
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+        topk_cs_index_list = []#点位
+        
+        input_ids = input_ids[:, 1:]#这步是为了构造形状吗？不是的，input有个上下文token窗口
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]#40
+        self.reset()#将树mask设置为空，就是理论上也不会有的
+
+        # with Timer("draft many"): hidden_states=, input_ids=
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            topk_cs_index_list.append(0)
+            out_hidden, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)#使用hidden层，过一遍草稿模型,得到t+2时刻的隐藏层
+        self.stable_kv = past_key_values
+        last_hidden = out_hidden[:, -1]#取隐藏层最后一个feature，out_hidden=torch.Size([1, 40, 4096]) last_hidden=torch.Size([1, 4096])
+
+        last_headout = head(last_hidden)#last_headout=torch.Size([1, 32000])
+
+        last_p = self.logsoftmax(last_headout)#softmax了一下
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values#只有10个在这里
+        scores = topk_p[0]#torch.Size([1, 10])_>torch.Size([10])
+        scores_list.append(scores[None])#升高维度了,又变会topk_p
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))#0节点载入了
+        ss_token.append(topk_index)#在last_headout的index
+        input_ids = topk_index#获取概率的索引值，原来这个索引值，就是token是什么，也是后面算embedding的东西
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)#torch.Size([1, 10, 4096])一列复制10topk遍,batchsize到时候给10个id合在一起
+        tree_mask = self.tree_mask_init#初始化单位矩阵
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)#0~9的整数
+        
+        # 4
+        for i in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids#len_posi是input的token数,self.position_ids为10size的数组0矩阵，position_ids数组全是len_posi
+            # with Timer("draft one"): input_hidden：torch.Size([1, 10, 4096]) input_ids：torch.Size([1, 10])
+            out_hidden, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            len_posi += 1#整体的位置+1
+
+            # with Timer("sort1"):
+            bias1 = top_k if i > 0 else 0#如果不是第一次跑,就没有这个
+            bias2 = max(0, i - 1)#选择最大的那个
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)#整棵树的相对位置
+            parents_list.append(parents)
+            topk_cs_index_list.append(parents)
+
+            last_headout = head(out_hidden[0])#last_headout=torch.Size([1, 32000]) out_hidden[0]=torch.Size([10, 4096])
+            last_p = self.logsoftmax(last_headout)#torch.Size([10, 32000])
+
+            top = torch.topk(last_p, top_k, dim=-1)#对每行取个topk
+            topk_index, topk_p = top.indices, top.values#这里是选取点
+
+            cu_scores = topk_p + scores[:, None]#为什么要加起来？我知道现在每个节点的分数都在这，因为是log算法，直接加就行
+
+            topk_cs = torch.topk(cu_scores.view(-1), top_k, dim=-1)#cu_scores里面本来就是每k个节点循环一次
+            topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values#topk_cs_index,可以知道是第几个节点的topk
+            scores = topk_cs_p
+            #做父节点定位,寻找到特定的f
+            out_ids = topk_cs_index // top_k#取其商，定位在top里的当前节点位置，以便取其隐藏层
+            input_hidden = out_hidden[:, out_ids]#因为输出的只有
+            # with Timer("2index"):
+            #     in_ids = topk_cs_index % top_k
+            #     input_ids = topk_index[out_ids, in_ids][None]
+            # with Timer("1index"):
+            input_ids = topk_index.view(-1)[topk_cs_index][None]#topk_index依旧存的是索引，所以也是展开
+            #topk_cs_index取余就第几个节点的子节点, 取商就是在节点的第几个位置
+            # print(input_ids.equal(input_ids0))
+
+            ss_token.append(topk_index)#每轮的token值
+            scores_list.append(cu_scores)#每轮的scores表
+            tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)#torch.Size([1, 1, 10, 20])
+
+            # if self.threshold < 0 and cu_scores.max() < self.threshold:
+            #     break
+
+        # del parents_list,scores_list,ss_token
+        # return draft_tokens, mask_index,tree_mask,tree_position_ids
+
+        # with Timer("post"):
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        #parents_list里面填的是整棵树的相对位置,top_scores_index// top_k看起来是第几层的信息
+        #不要被迷惑了,这层就是获得相对位置,top_scores_index就是那颗完整的树
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)#除了叶节点,其余节点在整个树的位置
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # with Timer("mask"):
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        # with Timer("mask1"):
+        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
+        #     tree_mask0[0][0] = True
+        #     for i in range(total_tokens):
+        #         #tree_mask0[i + 1][0]=True
+        #         tree_mask0[i + 1][i + 1] = True
+        #         p=mask_index_list[i]
+        #         tree_mask0[i + 1][p] = True
+        #         while p:
+        #             p=mask_index_list[p-1]
+        #             tree_mask0[i + 1][p] = True
+        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
+        #
+        # print(tree_mask0.equal(tree_mask))
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+        #draft_tokens=torch.Size([1, 60]),retrieve_indices=torch.Size([20, 7]), torch.Size([1, 1, 60, 60]),torch.Size([60])
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
+    def acc(self, data, head, max_length=5):
+        hidden_states = data["hidden_states"]
+        input_ids = data["input_ids"]
+        # attention_mask=data["attention_mask"]
+        loss_mask = data["loss_mask"]
+        sample_mask = data["sample_mask"]
+        target = data["target"]
+        total = [0 for _ in range(max_length)]
+        correct = [0 for _ in range(max_length)]
+        bs, sl = hidden_states.shape[0], hidden_states.shape[1]
+        target_headout = head(target)
+        hidden_states_headout = head(hidden_states)
+
+        for i in range(bs):
+            for j in range(sl):
+                if loss_mask[i, j] == 0:
+                    continue
+                single_hidden_states = hidden_states[i, :j]
+                single_input_ids = input_ids[i, :j]
+
+                single_hidden_states = single_hidden_states[None, :, :]
+                single_input_ids = single_input_ids[None, :]
+                for k in range(max_length):
+                    tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
+                    tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
+                    target_in_token = torch.argmax(tmp_in_target_headout)
+                    target_out_token = torch.argmax(tmp_out_target_headout)
+                    tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
+                    tmp_sample_mask = sample_mask[i, single_hidden_states.shape[1] - 1]
+                    if not (target_in_token == tmp_token):
+                        break
+                    out_hidden = self(single_hidden_states, input_ids=single_input_ids)
+                    last_hidden = out_hidden[:, -1]
+                    last_headout = head(last_hidden)
+                    token = torch.argmax(last_headout)
+                    total[k] += 1
+                    if token == target_out_token:
+                        correct[k] += 1
+                    else:
+                        for kk in range(k, max_length):
+                            total[kk] += 1
+                        break
+
+                    single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
+                    single_input_ids = torch.cat(
+                        (single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)), dim=1)
+
+        acc = [correct[i] / total[i] for i in range(len(correct))]
+        return acc
+
+
+class ModelLpfrog2(nn.Module):
+    def __init__(self, config, load_emb=False, path=None, bias=True, total_tokens=63, depth=5, top_k=8, threshold=1.0):
+        super().__init__()
+
+        self.gradient_checkpointing = True
+        self.padding_idx = config.pad_token_id
+        self.vocab_size = config.vocab_size
+
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        if load_emb:
+            from safetensors import safe_open
+            import json
+            try:
+                with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                with safe_open(os.path.join(path, emb_path),
+                               framework="pt",
+                               device="cpu") as f:
+                    tensor_slice = f.get_slice("model.embed_tokens.weight")
+                    vocab_size, hidden_dim = tensor_slice.get_shape()
+                    tensor = tensor_slice[:, :hidden_dim].float()
+            except:
+                with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
+                    index_json = json.loads(f.read())
+                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                weights = torch.load(os.path.join(path, emb_path))
+                tensor = weights["model.embed_tokens.weight"].float()
+            self.embed_tokens.weight.data = tensor
+
+        self.top_k = top_k
+        self.total_tokens = total_tokens - 1
+        self.depth = depth
+        self.threshold = math.log(threshold)
+        # print("total_tokens",total_tokens)
+        # print("depth",depth)
+        # print("top_k",top_k)
+        # print("threshold",threshold)
+
+        self.layers = nn.ModuleList([LlamaDecoderLayer(config, index) for index in range(config.num_hidden_layers)])
+        self.layers2 = None
+        
+        # self.layers2 = nn.ModuleList([LlamaDecoderLayer(config, index) for index in range(config.num_hidden_layers)])
+        # self.layers_list = nn.ModuleList([
+        #     nn.ModuleList([LlamaDecoderLayer(config, index),LlamaDecoderLayer(config, index)])
+        #     for index in range(config.num_hidden_layers)
+        #     ])
+        self.fc = nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias)
+        self.fc2 = None
+        # self.fc2 = nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias)
+        head_num = 2
+        #firsthead is 2->1, head2 is 4->1, maybe it is a lot of change
+        # self.fc_list = nn.ModuleList([nn.Linear(2* i * config.hidden_size, config.hidden_size, bias=bias) for i in range(head_num)])
+        #second change,I do not think it will change
+        # self.fc_list2 = nn.ModuleList(
+        #     [
+        #         nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias),
+        #         nn.Sequential(
+        #             nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias),
+        #             nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias)
+        #         )
+        #         ]
+        #     )
+        self.act = ACT2FN[config.hidden_act]
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
+        for param in self.embed_tokens.parameters():
+            param.requires_grad = False
+
+    def init_tree0(self):
+        self.tree_mask_init = torch.eye(self.top_k, device=self.embed_tokens.weight.device)[None, None]
+        self.position_ids = torch.zeros(self.top_k, device=self.embed_tokens.weight.device, dtype=torch.long)
+        self.tree_mask_init = self.tree_mask_init.to(self.embed_tokens.weight.device)
+
+
+    def init_tree(self):
+        self.tree_mask_init = torch.eye(self.top_k*2, device=self.embed_tokens.weight.device)[None, None]
+        self.position_ids = torch.zeros(self.top_k*2, device=self.embed_tokens.weight.device, dtype=torch.long)
+        self.tree_mask_init = self.tree_mask_init.to(self.embed_tokens.weight.device)
+
+
+    def reset(self):
+        self.tree_mask = None
+
+    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
+        # create causal mask
+        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+        combined_attention_mask = None
+        if input_shape[-1] > 1:
+            combined_attention_mask = _make_causal_mask(
+                input_shape,
+                # inputs_embeds.dtype,
+                torch.float32,  # [MODIFIED] force to cast to float32
+                device=inputs_embeds.device,
+                past_key_values_length=past_key_values_length,
+            )
+
+        if attention_mask is not None:
+            # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
+            expanded_attn_mask = _expand_mask(attention_mask, torch.float32, tgt_len=input_shape[-1]).to(
+                inputs_embeds.device
+            )
+            combined_attention_mask = (
+                expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
+            )
+
+        # [MODIFIED] add tree mask
+        if hasattr(self, "tree_mask") and self.tree_mask is not None:
+            tree_mask = self.tree_mask
+            _, _, tree_shape0, tree_shape1 = tree_mask.shape
+            combined_attention_mask[:, :, -tree_shape0:, -tree_shape1:][
+                tree_mask == 0
+                ] = torch.finfo(torch.float32).min
+
+        return combined_attention_mask
+
+    def forward(
+            self,
+            hidden_states,
+            input_ids,
+            attention_mask: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[List[torch.FloatTensor]] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            std=None
+    ):
+        batch_size, seq_length, _ = hidden_states.shape
+        seq_length_with_past = seq_length
+        past_key_values_length = 0
+
+        with torch.no_grad():
+            inputs_embeds = self.embed_tokens(input_ids)
+            # inputs_embeds = inputs_embeds.detach()
+
+        # if std is not None:
+        #     noise = torch.randn(inputs_embeds.size(),device=inputs_embeds.device) * std
+        #     inputs_embeds=inputs_embeds+noise
+
+        if past_key_values is not None:
+            past_key_values_length = past_key_values[0][0].shape[2]
+            seq_length_with_past = seq_length_with_past + past_key_values_length
+        if position_ids is None:
+            device = hidden_states.device if hidden_states is not None else inputs_embeds.device
+            position_ids = torch.arange(
+                past_key_values_length, seq_length + past_key_values_length, dtype=torch.long, device=device
+            )
+            position_ids = position_ids.unsqueeze(0).view(-1, seq_length)
+        else:
+            position_ids = position_ids.view(-1, seq_length).long()
+
+        position_ids2 = position_ids + 1 
+        #position_ids=position_ids//4
+        if attention_mask is None:
+            attention_mask = torch.ones(
+                (batch_size, seq_length_with_past), dtype=torch.bool, device=hidden_states.device
+            )
+        attention_mask = self._prepare_decoder_attention_mask(
+            attention_mask, (batch_size, seq_length), hidden_states, past_key_values_length
+        )
+
+        # if self.gradient_checkpointing and self.training:
+        #    if use_cache:
+        #        use_cache = False
+
+        # hidden_states=self.act(self.fc(torch.cat((inputs_embeds,hidden_states),dim=-1)))
+        inputs_embeds = inputs_embeds.to(hidden_states.dtype)
+        hidden_states = self.fc(torch.cat((inputs_embeds, hidden_states), dim=-1))#f0e1
+        hidden_states2 = self.fc(torch.cat((hidden_states, hidden_states), dim=-1))#f0e1f0e1
+
+        all_hidden_states = () if output_hidden_states else None
+        all_hidden_states2 = () if output_hidden_states else None
+        next_decoder_cache = () if use_cache else None
+
+        for idx, decoder_layer in enumerate(self.layers):
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
+                all_hidden_states2 += (hidden_states2,)
+
+            past_key_value = past_key_values[idx] if past_key_values is not None else None
+
+            if self.gradient_checkpointing and self.training:
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return module(*inputs, past_key_value, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(decoder_layer),
+                    hidden_states,
+                    attention_mask,
+                    position_ids,
+                )
+            else:
+                layer_outputs = decoder_layer(
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                )
+                layer_outputs1 = self.layers[idx](
+                    hidden_states,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids2,
+                    past_key_value=past_key_value,
+                    output_attentions=output_attentions,
+                    use_cache=use_cache,
+                )
+
+            hidden_states = layer_outputs[0]#f1
+            hidden_states_lpfrog = layer_outputs1[0]#f2
+
+            if use_cache:
+                next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
+
+        if use_cache:
+            return hidden_states, hidden_states_lpfrog, next_decoder_cache
+
+        return hidden_states, hidden_states_lpfrog
+
+    def reset_kv(self):
+        self.stable_kv = None
+
+    def kl_divergence(log_p, log_q):
+        """
+        计算两个以对数形式表示的概率分布的 KL 散度。
+        
+        参数:
+        - log_p (torch.Tensor): 源分布的对数概率，形状为 (N,)
+        - log_q (torch.Tensor): 目标分布的对数概率，形状为 (N,)
+        
+        返回:
+        - float: KL 散度的值
+        """
+        # 将 log 概率转换为实际概率
+        p = torch.exp(log_p)
+
+        # 计算 KL 散度
+        kl_div = (p * (log_p - log_q)).sum()
+        
+        return kl_div
+
+    @torch.no_grad()
+    def compute_kl_and_update_scores(
+        self, last_norm_p, predict_p, scores, scores_list, ss_token
+    ):
+        """
+        计算KL散度并更新分数列表和选择的token。
+
+        参数:
+        - last_norm_p: 当前时间步的归一化概率分布 (形状: [top_k, vocab_size])
+        - predict_p: 预测的未来分布 (形状: [1, vocab_size])
+        - scores: 当前累积分数 (形状: [1])
+        - top_k: 选择的top_k值
+        - kl_divergence: 计算KL散度的函数
+        - scores_list: 记录分数的列表
+        - ss_token: 记录选择的token的列表
+
+        返回:
+        - scores_list: 更新后的分数列表
+        - ss_token: 更新后的选择的token列表
+        """
+        top_k = self.top_k
+        # 计算KL散度
+        kl_results = torch.zeros((top_k, 1))
+        for i in range(top_k):
+            kl_results[i, 0] = self.kl_divergence(last_norm_p[i], predict_p[0])
+        # 找到最小KL散度的索引
+        _, midx = torch.min(kl_results, dim=0)
+        # 去掉原始分布，更新分布
+        last_norm_p[midx] = predict_p[0]
+        # 从分布中采样top_k个token
+        top_norm = torch.topk(last_norm_p, top_k, dim=-1)
+        # 获取其索引（即token_id）和对应的概率
+        topk_norm_index, topk_norm_p = top_norm.indices, top_norm.values
+        # 更新分数
+        norm_scores = topk_norm_p + scores[:, None]
+        # 将分数和token添加到列表中
+        scores_list.append(norm_scores)
+        ss_token.append(topk_norm_index)
+        
+        return scores_list, ss_token, midx, norm_scores, topk_norm_index
+
+    @torch.no_grad()
+    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens
+        depth = self.depth
+        top_k = self.top_k
+
+        sample_token = input_ids[:, -1]
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+
+        input_ids = input_ids[:, 1:]
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]#40
+        self.reset()
+
+        predict_out_hidden = None
+        # with Timer("draft many"):
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden_norm,out_hidden_lpfrog, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden_norm,out_hidden_lpfrog, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        self.stable_kv = past_key_values
+        #listize
+        # last_hidden_list = [out_hidden[:, -1] for out_hidden in out_hidden_list]
+        last_hidden = out_hidden_norm[:, -1]
+        last_headout = head(last_hidden)
+        last_p = self.logsoftmax(last_headout)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values#这里是选取点#[1,3]
+        scores = topk_p[0]
+        scores_list.append(scores[None])
+        ss_token.append(topk_index)
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        
+        last_hidden_lpfrog = out_hidden_lpfrog[:, -1]
+        last_headout_lpfrog = head(last_hidden_lpfrog)
+        last_p_lpfrog = self.logsoftmax(last_headout_lpfrog)
+        predict_p = last_p_lpfrog
+        #==========================
+        #处理future leapfrog和now leapfrog
+        top_lpfrog = torch.topk(predict_p, top_k, dim=-1)
+        topk_index_lpfrog, _ = top_lpfrog.indices, top_lpfrog.values
+
+        input_ids = torch.cat((topk_index,topk_index_lpfrog),dim=-1)
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        input_hidden_lpfrog = last_hidden_lpfrog[None].repeat(1, top_k, 1)
+        input_hidden = torch.cat((input_hidden,input_hidden_lpfrog),dim=1)
+        
+        tree_mask = self.tree_mask_init
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        #===========LLM推理结束
+        for i in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids #位置更新
+            out_hidden_norm, out_hidden_lpfrog, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            #预处理阶段
+            last_normheadout = head(out_hidden_norm[0])
+            last_leapfrogheadout = head(out_hidden_lpfrog[0])
+            last_norm_p = self.logsoftmax(last_normheadout)#torch.Size([3, 32000])
+            last_leapfrog_p = self.logsoftmax(last_leapfrogheadout)
+            #切成四份
+            last_now_norm_p = last_norm_p[:top_k,:]
+            last_future_norm_p = last_norm_p[top_k:,:]
+            last_now_leapfrog_p = last_leapfrog_p[:top_k,:]
+            last_future_leapfrog_p = last_leapfrog_p[top_k:,:]
+            #==========================
+            #第一层
+            scores_list, ss_token, idx_norm, now_norm_scores,_= self.compute_kl_and_update_scores(
+                self, last_now_norm_p, predict_p, scores, scores_list, ss_token)
+            bias1 = top_k if i > 0 else 0
+            bias2 = max(0, i - 1)
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)
+            parents_list.append(parents)
+            i += 1
+            #==========================
+            #对第二层的预处理
+            predict_p = last_now_leapfrog_p[idx_norm]
+            scores = now_norm_scores[idx_norm]
+            topk_cs_index = idx_norm.repeat(top_k)
+            tree_mask = torch.cat((tree_mask[:, :, topk_cs_index], self.tree_mask_init), dim=3)
+            #==========================
+            #第二层
+            scores_list, ss_token, idx_lpfrog, future_norm_scores,topk_future_norm_index= self.compute_kl_and_update_scores(
+                self, last_future_norm_p, predict_p, scores, scores_list, ss_token)
+            bias1 = top_k if i > 0 else 0
+            bias2 = max(0, i - 1)
+            bias = 1 + top_k ** 2 * bias2 + bias1
+            parents = (topk_cs_index + bias)
+            parents_list.append(parents)
+            i += 1
+            #==========================
+            #对第未来层的预处理
+            predict_p = last_future_leapfrog_p[idx_lpfrog]
+            scores = future_norm_scores[idx_lpfrog]
+            topk_cs_index = idx_norm.repeat(top_k)
+            tree_mask = torch.cat((tree_mask[:, :, topk_cs_index], self.tree_mask_init), dim=3)
+            #==========================
+            #处理future leapfrog和now leapfrog
+            top_future_leapfrog = torch.topk(last_future_leapfrog_p, top_k, dim=-1)
+            topk_future_leapfrog_index, _ = top_future_leapfrog.indices, top_future_leapfrog.values
+            
+            chosen_now_leapfrog = topk_future_norm_index[idx_lpfrog]
+            chosen_future_leapfrog = topk_future_leapfrog_index[idx_lpfrog]
+            
+            input_hidden_now = out_hidden_lpfrog[:,idx_lpfrog,:].repeat(1, top_k, 1)
+            input_hidden_future = out_hidden_lpfrog[:,idx_lpfrog+top_k,:].repeat(1, top_k, 1)
+            input_hidden = torch.cat((input_hidden_now,input_hidden_future),dim=1)
+            input_ids = torch.cat((chosen_now_leapfrog,chosen_future_leapfrog),dim=1)
+            len_posi += 2#推理了俩层,当然加2
+
+        #总树topk
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        #如何去做一个draft_tokens, 考虑top_scores_index如何构建
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        #树的构建
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # with Timer("mask"):
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        # with Timer("mask1"):
+        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
+        #     tree_mask0[0][0] = True
+        #     for i in range(total_tokens):
+        #         #tree_mask0[i + 1][0]=True
+        #         tree_mask0[i + 1][i + 1] = True
+        #         p=mask_index_list[i]
+        #         tree_mask0[i + 1][p] = True
+        #         while p:
+        #             p=mask_index_list[p-1]
+        #             tree_mask0[i + 1][p] = True
+        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
+        #
+        # print(tree_mask0.equal(tree_mask))
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
+    def acc(self, data, head, max_length=5):
+        hidden_states = data["hidden_states"]
+        input_ids = data["input_ids"]
+        # attention_mask=data["attention_mask"]
+        loss_mask = data["loss_mask"]
+        sample_mask = data["sample_mask"]
+        target = data["target"]
+        total = [0 for _ in range(max_length)]
+        correct = [0 for _ in range(max_length)]
+        bs, sl = hidden_states.shape[0], hidden_states.shape[1]
+        target_headout = head(target)
+        hidden_states_headout = head(hidden_states)
+
+        for i in range(bs):
+            for j in range(sl):
+                if loss_mask[i, j] == 0:
+                    continue
+                single_hidden_states = hidden_states[i, :j]
+                single_input_ids = input_ids[i, :j]
+
+                single_hidden_states = single_hidden_states[None, :, :]
+                single_input_ids = single_input_ids[None, :]
+                for k in range(max_length):
+                    tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
+                    tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
+                    target_in_token = torch.argmax(tmp_in_target_headout)
+                    target_out_token = torch.argmax(tmp_out_target_headout)
+                    tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
+                    tmp_sample_mask = sample_mask[i, single_hidden_states.shape[1] - 1]
+                    if not (target_in_token == tmp_token):
+                        break
+                    out_hidden = self(single_hidden_states, input_ids=single_input_ids)
+                    last_hidden = out_hidden[:, -1]
+                    last_headout = head(last_hidden)
+                    token = torch.argmax(last_headout)
+                    total[k] += 1
+                    if token == target_out_token:
+                        correct[k] += 1
+                    else:
+                        for kk in range(k, max_length):
+                            total[kk] += 1
+                        break
+
+                    single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
+                    single_input_ids = torch.cat(
+                        (single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)), dim=1)
+
+        acc = [correct[i] / total[i] for i in range(len(correct))]
+        return acc
 
 class Vhead(nn.Module):
     def __init__(self, ins=6566, outs=32000):
