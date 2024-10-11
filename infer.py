@@ -1,18 +1,23 @@
-from eagle.model.ea_model import EaModel
+from eagle.model.ea_model import EaModel_lpf
 from fastchat.model import get_conversation_template
 import torch
 base_model_path="meta-llama/Meta-Llama-3-8B-Instruct"
 EAGLE_model_path="yuhuili/EAGLE-LLaMA3-Instruct-8B"
-model = EaModel.from_pretrained(
+lpfrog_model_path ="/data/lei/eagle3output/state_0"
+# EAGLE_model_path = lpfrog_model_path
+model = EaModel_lpf.from_pretrained(
     base_model_path=base_model_path,
     ea_model_path=EAGLE_model_path,
+    lpfrog_model_path = lpfrog_model_path,
     torch_dtype=torch.float16,
     low_cpu_mem_usage=True,
     device_map="auto",
-    # total_token=9,
-    total_token=-1,
-    top_k=5,
+    total_token=9,
+    # total_token=-1,
+    # top_k=5,
+    top_k=3,
 )
+
 model.eval()
 your_message="Hello"
 conv = get_conversation_template("vicuna")

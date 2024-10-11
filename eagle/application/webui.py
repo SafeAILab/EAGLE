@@ -5,9 +5,9 @@ import time
 import gradio as gr
 import argparse
 try:
-    from ..model.ea_model import EaModel
+    from ..model.ea_model import EaModel_lpf
 except:
-    from eagle.model.ea_model import EaModel
+    from eagle.model.ea_model import EaModel_lpf
 import torch
 from fastchat.model import get_conversation_template
 import re
@@ -268,7 +268,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-model = EaModel.from_pretrained(
+model = EaModel_lpf.from_pretrained(
     base_model_path=args.base_model_path,
     ea_model_path=args.ea_model_path,
     total_token=args.total_token,

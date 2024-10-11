@@ -16,25 +16,27 @@ from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 
-from .cnets import Model,ModelLpfrog
+from .cnets import Model,ModelLpfrog,Model_forward_lpfrog
 from .configs import EConfig
 
 
 
 
 
-class EaModel(nn.Module):
+class EaModel_lpf(nn.Module):
 
     def __init__(
             self,
             base_model,
             base_model_name_or_path,
             ea_model_path,
+            lpfrog_model_path,
             total_token,
             depth,
             top_k,
             threshold,
-            ea_layer_state_dict
+            ea_layer_state_dict,
+            lpf_layer_state_dict,
     ):
 
         super().__init__()
@@ -43,16 +45,24 @@ class EaModel(nn.Module):
         self.hidden_size = base_model.lm_head.weight.shape[-1]
         self.vocab_size = base_model.lm_head.weight.shape[0]
         self.base_model_name_or_path = base_model_name_or_path
+        self.lpfrog_model_path = lpfrog_model_path
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name_or_path,use_fast=False)
         config = EConfig.from_pretrained(ea_model_path)
+        config_lpf = EConfig.from_pretrained(lpfrog_model_path)
         with open(ea_model_path,"r") as f:
             con=json.loads(f.read())
+        with open(lpfrog_model_path,"r") as f:
+            con_lpf=json.loads(f.read())
         try:
             bias=con["bias"]
         except:
             bias=True
+        try:
+            bias_lpf=con_lpf["bias"]
+        except:
+            bias_lpf=True
         self.ea_layer = Model(config,bias=bias,total_tokens=total_token,depth=depth,top_k=top_k,threshold=threshold)
-
+        self.lpfrog_layer = Model_forward_lpfrog(config_lpf,bias=bias_lpf,total_tokens=total_token,depth=depth,top_k=top_k,threshold=threshold)
         low_memory=False
 
         device = base_model.model.layers[-1].self_attn.q_proj.weight.device
@@ -66,7 +76,11 @@ class EaModel(nn.Module):
         else:
             self.ea_layer.diff_device = False
         self.ea_layer.load_state_dict(ea_layer_state_dict, strict=True)
+        self.lpfrog_layer.load_state_dict(lpf_layer_state_dict, strict=True)
         self.ea_layer.to(self.base_model.dtype).to(device)
+        self.lpfrog_layer.to(self.base_model.dtype).to(device)
+        #lpf
+        # self.ea_layer = self.lpfrog_layer
         self.ea_layer.init_tree()
         # self.ea_layer.init_tree()#倍数变多了
 
@@ -84,6 +98,7 @@ class EaModel(nn.Module):
             Type="LLaMA",
             base_model_path=None,
             ea_model_path=None,
+            lpfrog_model_path=None,
             total_token=59,
             depth=5,
             top_k=10,
@@ -106,6 +121,7 @@ class EaModel(nn.Module):
             )
 
         configpath=os.path.join(ea_model_path,"config.json")
+        configpath_lpf=os.path.join(lpfrog_model_path,"config.json")
         if not os.path.exists(configpath):
             configpath = hf_hub_download(ea_model_path, "config.json")
 
@@ -121,15 +137,31 @@ class EaModel(nn.Module):
             if not os.path.exists(load_model_path):
                 load_model_path = hf_hub_download(ea_model_path, "model.safetensors")
             ea_layer_state_dict = load_file(load_model_path)
+        
+        try:
+            load_model_path=os.path.join(lpfrog_model_path, "pytorch_model.bin")
+            if not os.path.exists(load_model_path):
+                load_model_path=hf_hub_download(lpfrog_model_path, "pytorch_model.bin")
+            ea_layer_state_dict = torch.load(load_model_path,
+                                             map_location=base_model.device)
+        except:
+            from safetensors.torch import load_file
+            load_model_path = os.path.join(lpfrog_model_path, "model.safetensors")
+            if not os.path.exists(load_model_path):
+                load_model_path = hf_hub_download(lpfrog_model_path, "model.safetensors")
+            lpf_layer_state_dict = load_file(load_model_path)
+        
         model = cls(
             base_model,
             base_model_path,
             configpath,
+            configpath_lpf,
             total_token,
             depth,
             top_k,
             threshold,
-            ea_layer_state_dict
+            ea_layer_state_dict,
+            lpf_layer_state_dict
         )
 
 
@@ -237,7 +269,7 @@ class EaModel(nn.Module):
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
         draft_tokens, retrieve_indices,tree_mask,tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, past_key_values, logits_processor
+            input_ids, self, past_key_values, logits_processor, self.lpfrog_layer
         )
         new_token = 0
 

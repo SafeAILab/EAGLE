@@ -26,7 +26,7 @@ import transformers
 
 
 from ..model.utils_alpha import *
-from ..model.ea_model import EaModel
+from ..model.ea_model import EaModel_lpf
 from ..model.kv_cache import initialize_past_key_values
 from ..model.choices import *
 
@@ -194,7 +194,7 @@ def get_model_answers(
 
 
 
-    model = EaModel.from_pretrained(
+    model = EaModel_lpf.from_pretrained(
         base_model_path = base_model_path,
         ea_model_path = ea_model_path,
         torch_dtype=torch.float16,

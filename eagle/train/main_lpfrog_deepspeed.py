@@ -1,5 +1,5 @@
 import argparse
-
+import deepspeed
 parser = argparse.ArgumentParser(description='sp')
 parser.add_argument('--basepath', type=str, default='/home/lyh/weights/hf/vicuna_v13/7B/')
 parser.add_argument('--configpath', type=str, default="config.json")
@@ -8,6 +8,7 @@ parser.add_argument('--bs', type=int, default=4)
 parser.add_argument('--gradient-accumulation-steps', type=int, default=1)
 parser.add_argument('--tmpdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
+parser = deepspeed.add_config_arguments(parser)
 args = parser.parse_args()
 
 train_config = {
@@ -58,7 +59,7 @@ accelerator = Accelerator(mixed_precision='bf16',
 accelerator1 = Accelerator(mixed_precision='bf16',
                           gradient_accumulation_steps=train_config["gradient_accumulation_steps"])
 # accelerator1.distributed_type = Accelerator.DistributedType.MULTI_GPU
-from ..model.cnets import Model,Model_forward_lpfrog
+from ..model.cnets import Model
 from ..model.configs import EConfig
 from typing import Any, Dict, List
 
@@ -69,6 +70,7 @@ from tqdm import tqdm
 import numpy as np
 from transformers import get_linear_schedule_with_warmup, AutoConfig
 
+deepspeed.init_distributed()
 if accelerator.is_main_process:
     import wandb
 
@@ -159,21 +161,18 @@ class CustomDataset_lpfrog(Dataset):
 
 
             length = hidden_state.shape[1]
-            length -= 1
             # length_q = data['query_ids'].shape[1]
             attention_mask = [1] * length
             loss_mask = loss_mask[0].tolist()
-            loss_mask.pop()
             loss_mask[-1] = 0
 
             input_ids_target = input_ids[:, 1:] #最后一个不需要了
-            input_ids_target = input_ids_target[:,:-1]
+            # input_ids_target = input_ids_target[:,:-1]
             zeropadding = torch.tensor([[0]])
             input_ids_target = torch.cat((input_ids_target, zeropadding), dim=1)
 
-            #label
-            # target = hidden_state[:, 1:, :] #原来是这样的,下一个就是,但是新的第一个不需要了
-            target = hidden_state[:, 2:, :] #原来是这样的,下一个就是,但是新的第一个不需要了
+            target = hidden_state[:, 1:, :] #原来是这样的,下一个就是,但是新的第一个不需要了
+            # target = hidden_state[:, 2:, :]
             zeropadding = torch.zeros(1, 1, target.shape[2])
             target = torch.cat((target, zeropadding), dim=1)
             loss_mask[-1] = 0
@@ -182,12 +181,6 @@ class CustomDataset_lpfrog(Dataset):
             new_data["target"] = target
             new_data["hidden_state_big"] = hidden_state
             new_data["input_ids"] = input_ids_target
-            # if input_ids_target.shape[1] ==2048:
-            #     print(index)
-            # if target.shape[1] ==2048:
-            #     print(index)
-            # if input_ids.shape[1] ==2048:
-            #     print(index)
 
 
             if self.transform:
@@ -258,11 +251,8 @@ def compute_loss(target, target_p, predict, loss_mask, head_loss):
     
     ori_device = predict.device
     # full_device = f"cuda:{2+ori_device.index}"
-    if ori_device.index == 0:
-        # full_device = f"cuda:1"
-        full_device = f"cuda:{2+ori_device.index}"
-    else:
-        full_device = "cpu"
+    # full_device = f"cuda:1"
+    full_device = "cpu"
     # print(ori_device,full_device)
     target = target.to(full_device)
     target_p = target_p.to(full_device)
@@ -274,7 +264,6 @@ def compute_loss(target, target_p, predict, loss_mask, head_loss):
     out_logp = nn.LogSoftmax(dim=2)(out_head)
     plogp = target_p * out_logp
     ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum() + 1e-5)
-    # ploss = -torch.sum(torch.sum(loss_mask * (target_p * out_logp), 2)) / (loss_mask.sum() + 1e-5)
     vloss = criterion(predict, target)
     vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum() + 1e-5)
     
@@ -366,8 +355,8 @@ if accelerator.is_main_process:
         os.makedirs(args.cpdir)
 
 config = EConfig.from_pretrained(train_config["config_path"])
-# model = Model(config, load_emb=True, path=args.basepath)
-model = Model_forward_lpfrog(config, load_emb=True, path=args.basepath)
+model = Model(config, load_emb=True, path=args.basepath)
+
 criterion = nn.SmoothL1Loss(reduction="none")
 optimizer = optim.AdamW(model.parameters(), lr=train_config["lr"], betas=(train_config["b1"], train_config["b2"]))
 
@@ -375,6 +364,22 @@ num_epochs = train_config["num_epochs"]
 num_warmup_steps = train_config["num_warmup_steps"]
 total_steps = train_config["total_steps"]
 is_warmup = train_config["is_warmup"]
+
+
+model_engine, optimizer, train_loader, _ = deepspeed.initialize(args=args,
+                                                                model=model,
+                                                                model_parameters=model.parameters(),
+                                                                training_data=traindataset,
+                                                                collate_fn=DataCollatorWithPadding()
+                                                                )
+
+head_engine, _, test_loader, _ = deepspeed.initialize(args=args,
+                                                      model=head,
+                                                      model_parameters=head.parameters(),
+                                                      training_data=testdataset,
+                                                      collate_fn=DataCollatorWithPadding()
+                                                      )
+
 
 if is_warmup:
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps,
@@ -391,6 +396,11 @@ else:
     model, head, optimizer, train_loader, test_loader = accelerator.prepare(
         model, head, optimizer, train_loader, test_loader
     )
+for epoch in range(num_epochs + 1):
+    for batch_idx, data in enumerate(tqdm(train_loader)):
+        print(batch_idx)
+import sys
+sys.exit() 
 
 # accelerator.load_state("checkpoints/state_5")
 for epoch in range(num_epochs + 1):
@@ -415,9 +425,6 @@ for epoch in range(num_epochs + 1):
             loss_mask = data["loss_mask"][:, :, None]
             vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask,head)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
-            del ploss, vloss, target_p, predict
-            ori_device = loss.device
-            full_device = "cpu"
             # loss.backward()
             accelerator.backward(loss)
             accelerator.clip_grad_value_(model.parameters(), train_config["grad_clip"])
@@ -425,12 +432,6 @@ for epoch in range(num_epochs + 1):
             if is_warmup:
                 scheduler.step()
 
-        if accelerator.is_local_main_process and (batch_idx) % 2000 == 0:
-            save_path = os.path.join(args.cpdir,str(batch_idx))
-            if not os.path.exists(save_path):
-                os.makedirs(save_path)
-            accelerator.save_state(output_dir=f"{save_path}/state_{epoch}")
-        
         with torch.no_grad():
             _, predicted = torch.max(out_head, 2)
             _, target = torch.max(target_head, 2)
@@ -444,18 +445,15 @@ for epoch in range(num_epochs + 1):
             total += ct
             correct += cc
         if accelerator.is_main_process and ct != 0:
-            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"], 
-                    #    "train/vloss": vloss.item(),
-                    #    "train/ploss": ploss.item(), 
-                       "train/loss": loss.item(), 
-                       "train/acc": cc / ct}
+            logdict = {"train/lr": optimizer.optimizer.param_groups[0]["lr"], "train/vloss": vloss.item(),
+                       "train/ploss": ploss.item(), "train/loss": loss.item(), "train/acc": cc / ct}
             for id, i in enumerate(top_3acc):
                 logdict[f'train/top_{id + 1}_acc'] = topkacc[id].item() / ct
             wandb.log(logdict)
             # for id,i in enumerate(top_3acc):
             #     wandb.log({f'train/top_{id+1}_acc':topkacc[id].item()/ct})
 
-        # del ploss, vloss
+        del ploss, vloss
         epoch_loss += loss.item()
         num_batches += 1
 

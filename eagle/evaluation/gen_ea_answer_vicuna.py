@@ -16,7 +16,7 @@ from fastchat.llm_judge.common import load_questions
 from fastchat.model import get_conversation_template
 from tqdm import tqdm
 
-from ..model.ea_model import EaModel
+from ..model.ea_model import EaModel_lpf
 from ..model.kv_cache import initialize_past_key_values
 from ..model.utils import *
 
@@ -95,7 +95,7 @@ def get_model_answers(
 ):
     # temperature = 0.0
 
-    model = EaModel.from_pretrained(
+    model = EaModel_lpf.from_pretrained(
         base_model_path=base_model_path,
         ea_model_path=ea_model_path,
         total_token=args.total_token,
