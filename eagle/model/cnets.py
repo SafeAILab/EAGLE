@@ -1689,7 +1689,7 @@ class ModelEagle(nn.Module):
             #对第未来层的预处理
             predict_p = last_future_leapfrog_p[idx_lpfrog]
             scores = future_norm_scores[idx_lpfrog][0]
-            idx_lpfrog = idx_norm.to(base_index.device)
+            idx_lpfrog = idx_lpfrog.to(base_index.device)
             topk_cs_index = base_index + idx_lpfrog*top_k
             output_id_futue = idx_lpfrog.repeat(top_k)
             sub_tree_mask = torch.cat((tree_mask[:, :, output_id_now], tree_mask[:, :, output_id_futue]), dim=2)
@@ -1729,7 +1729,7 @@ class ModelEagle(nn.Module):
         mask_index_list = mask_index.tolist()
         # with Timer("mask"):
         tree_mask = torch.eye(total_tokens + 1).bool()
-        tree_mask[:, 0] = True
+        tree_mask[:, 0] = True#根节点都看得见
         for i in range(total_tokens):
             tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
 
@@ -1747,11 +1747,11 @@ class ModelEagle(nn.Module):
         noleaf_num = len(noleaf_index) - 1
         leaf_num = total_tokens - noleaf_num
 
-        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1#推理链码
         retrieve_indices = retrieve_indices.tolist()
 
         rid = 0
-        position_ids_list = tree_position_ids.tolist()
+        position_ids_list = tree_position_ids.tolist()#节点的深度
 
         for i in range(total_tokens + 1):
             if i not in noleaf_index:
