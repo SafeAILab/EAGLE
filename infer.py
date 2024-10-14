@@ -15,6 +15,7 @@ model = EaModel_lpf.from_pretrained(
     total_token=9,
     # total_token=-1,
     # top_k=5,
+    depth = 3,
     top_k=3,
 )
 
