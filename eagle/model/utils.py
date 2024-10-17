@@ -223,13 +223,13 @@ def initialize_tree0(input_ids, model, past_key_values, logits_processor):
     #     input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
     #     # Clone the output hidden states
     #
-    #     draft_tokens, retrieve_indices,tree_mask,tree_position_ids = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head)
+    #     draft_tokens, retrieve_indices,tree_mask,tree_position_ids = self.ea_layer.topK_genrate_kl(hidden_states, input_ids, self.base_model.lm_head)
     #     if output_orig:
     #         return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, outputs, orig, hidden_states, token
     #     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, hidden_states, token
     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, logits, hidden_state, sample_token
 
-def initialize_tree(input_ids, model, past_key_values, logits_processor, lpfrog_layer):
+def initialize_tree(input_ids, model, past_key_values, logits_processor):
     outputs, orig, hidden_states = model(#hidden_states is f0
         input_ids, past_key_values=past_key_values, output_orig=True
     )
@@ -245,8 +245,12 @@ def initialize_tree(input_ids, model, past_key_values, logits_processor, lpfrog_
     input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
     # Clone the output hidden states
 
-    draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(
-        hidden_states, input_ids, model.base_model.lm_head,logits_processor, lpfrog_layer)
+    if model.generate_type == "kl":
+        draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate_kl(
+            hidden_states, input_ids, model.base_model.lm_head,logits_processor, model.lpfrog_layer)
+    else:
+        draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(
+            hidden_states, input_ids, model.base_model.lm_head,logits_processor)
     return draft_tokens, retrieve_indices,tree_mask,tree_position_ids, orig, hidden_states, token
 
 
@@ -453,7 +457,7 @@ def update_inference_inputs(
         token = torch.argmax(prob)
         token = token[None, None]
     # hidden_state = torch.cat((hidden_state, accept_hidden_state_new), dim=1)
-    draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate(accept_hidden_state_new,
+    draft_tokens, retrieve_indices,tree_mask,tree_position_ids = model.ea_layer.topK_genrate_kl(accept_hidden_state_new,
                                               input_ids=torch.cat((input_ids, token.to(input_ids.device)), dim=1),
                                               head=model.base_model.lm_head,logits_processor=logits_processor,
                                               lpfrog_layer=lpfrog_layer)

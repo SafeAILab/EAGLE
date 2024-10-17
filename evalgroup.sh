@@ -1,0 +1,8 @@
+# echo "baseline1"
+# python eagle/evaluation/speedfolder.py --jsonl-folder "/home/leihaodong/EAGLE3/mt_bench/lpf1" --jsonl-file-base "/home/leihaodong/EAGLE3/mt_bench/base-llama38b2_40-temperature-0.0.jsonl"
+# echo "baseline2"
+# python eagle/evaluation/speedfolder.py --jsonl-folder "/home/leihaodong/EAGLE3/mt_bench/lpf1" --jsonl-file-base "/home/leihaodong/EAGLE3/mt_bench/baseline_llama38b2_40-temperature-0.0.jsonl"
+echo "Nochange1"
+python eagle/evaluation/speedfolder.py --jsonl-folder "/home/leihaodong/EAGLE3/mt_bench/nochange" --jsonl-file-base "/home/leihaodong/EAGLE3/mt_bench/baseline_llama38b2_40-temperature-0.0.jsonl"
+echo "Nochange2"
+python eagle/evaluation/speedfolder.py --jsonl-folder "/home/leihaodong/EAGLE3/mt_bench/nochange" --jsonl-file-base "/home/leihaodong/EAGLE3/mt_bench/base-llama38b2_40-temperature-0.0.jsonl"

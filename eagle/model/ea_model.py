@@ -40,6 +40,7 @@ class EaModel_lpf(nn.Module):
     ):
 
         super().__init__()
+        self.generate_type = None
         self.base_model = base_model
         self.config = base_model.config
         self.hidden_size = base_model.lm_head.weight.shape[-1]
@@ -274,7 +275,7 @@ class EaModel_lpf(nn.Module):
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
         draft_tokens, retrieve_indices,tree_mask,tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
-            input_ids, self, past_key_values, logits_processor, self.lpfrog_layer
+            input_ids, self, past_key_values, logits_processor
         )
         new_token = 0
 

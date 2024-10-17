@@ -38,16 +38,25 @@ nohup python -m eagle.evaluation.gen_baseline_answer_llama3chat\
         --ea-model-path "yuhuili/EAGLE-LLaMA3-Instruct-8B"  \
         --base-model-path "meta-llama/Meta-Llama-3-8B-Instruct" > log/baseline1.log 2>&1 &
 #lpf test
-#5
+
+#2
 nohup python -m eagle.evaluation.gen_ea_answer_lpf_llama3chat\
   --ea-model-path "yuhuili/EAGLE-LLaMA3-Instruct-8B"  \
   --base-model-path "meta-llama/Meta-Llama-3-8B-Instruct" \
   --lpfrog-model-path /data/lei/eagle3output/state_20 \
-  --model-id "llama3_8b_chat_lpf_d5" > log/llama3_8b_chat_lpf_d5.log 2>&1 &
-#8
+  --depth 2 \
+  --model-id "llama3_8b_nochange_lpf_d2" > log/llama3_8b_nochange_lpf_d2.log 2>&1 &
+#3
 nohup python -m eagle.evaluation.gen_ea_answer_lpf_llama3chat\
   --ea-model-path "yuhuili/EAGLE-LLaMA3-Instruct-8B"  \
   --base-model-path "meta-llama/Meta-Llama-3-8B-Instruct" \
   --lpfrog-model-path /data/lei/eagle3output/state_20 \
-  --depth 8 \
-  --model-id "llama3_8b_chat_lpf_d8" > log/llama3_8b_chat_lpf_d8.log 2>&1 &
+  --depth 3 \
+  --model-id "llama3_8b_nochange_lpf_d3" > log/llama3_8b_nochange_lpf_d3.log 2>&1 &
+#4
+nohup python -m eagle.evaluation.gen_ea_answer_lpf_llama3chat\
+  --ea-model-path "yuhuili/EAGLE-LLaMA3-Instruct-8B"  \
+  --base-model-path "meta-llama/Meta-Llama-3-8B-Instruct" \
+  --lpfrog-model-path /data/lei/eagle3output/state_20 \
+  --depth 4 \
+  --model-id "llama3_8b_chat_lpf_d4" > log/llama3_8b_chat_lpf_d4.log 2>&1 &

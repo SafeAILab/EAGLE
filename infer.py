@@ -18,7 +18,7 @@ model = EaModel_lpf.from_pretrained(
     depth = 3,
     top_k=3,
 )
-
+model.generate_type = "kl"
 model.eval()
 your_message="Hello"
 conv = get_conversation_template("vicuna")
@@ -29,6 +29,6 @@ input_ids=model.tokenizer([prompt]).input_ids
 input_ids = torch.as_tensor(input_ids).cuda()
 # model.ea_layer.layers2=model.ea_layer.layers
 # model.ea_layer.fc2=model.ea_layer.fc
-output_ids=model.eagenerate(input_ids,temperature=0.5,max_new_tokens=512)
+output_ids=model.eagenerate(input_ids,temperature=0.5,max_new_tokens=60)
 output=model.tokenizer.decode(output_ids[0])
 print(output)
