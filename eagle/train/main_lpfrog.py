@@ -8,6 +8,7 @@ parser.add_argument('--bs', type=int, default=4)
 parser.add_argument('--gradient-accumulation-steps', type=int, default=1)
 parser.add_argument('--tmpdir', type=str, default='0')
 parser.add_argument('--cpdir', type=str, default='0')
+parser.add_argument('--checkpoint', type=str, default=None)
 args = parser.parse_args()
 
 train_config = {
@@ -257,31 +258,38 @@ def top_accuracy(output, target, topk=(1,)):
 def compute_loss(target, target_p, predict, loss_mask, head_loss):
     
     ori_device = predict.device
-    # full_device = f"cuda:{2+ori_device.index}"
     if ori_device.index == 0:
-        # full_device = f"cuda:1"
+        full_device_p = f"cuda:{1+ori_device.index}"
         full_device = f"cuda:{2+ori_device.index}"
     else:
         full_device = "cpu"
-    # print(ori_device,full_device)
     target = target.to(full_device)
-    target_p = target_p.to(full_device)
     predict = predict.to(full_device)
     loss_mask = loss_mask.to(full_device)
     head_loss = head_loss.to(full_device)
     
-    out_head = head_loss(predict)
-    out_logp = nn.LogSoftmax(dim=2)(out_head)
-    plogp = target_p * out_logp
-    ploss = -torch.sum(torch.sum(loss_mask * plogp, 2)) / (loss_mask.sum() + 1e-5)
-    # ploss = -torch.sum(torch.sum(loss_mask * (target_p * out_logp), 2)) / (loss_mask.sum() + 1e-5)
-    vloss = criterion(predict, target)
-    vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum() + 1e-5)
+    target_p = target_p.to(full_device_p)
+    loss_mask_p = loss_mask.to(full_device_p)
     
-    vloss = vloss.to(ori_device)
-    ploss = ploss.to(ori_device)
+    #full_device
+    out_head = head_loss(predict)
+    head_loss.to(ori_device)
+    del head_loss
+    out_logp = nn.LogSoftmax(dim=2)(out_head)
     out_head = out_head.to(ori_device)
-    head_loss = head_loss.to(ori_device)
+    #full_device_p
+    out_logp = out_logp.to(full_device_p)
+    plogp = target_p * out_logp
+    del target_p
+    ploss = -torch.sum(torch.sum(loss_mask_p * plogp, 2)) / (loss_mask_p.sum() + 1e-5)
+    del plogp,loss_mask_p
+    ploss = ploss.to(ori_device)
+    #full_device
+    vloss = criterion(predict, target)
+    del target
+    vloss = torch.sum(torch.mean(loss_mask * vloss, 2)) / (loss_mask.sum() + 1e-5)
+    del loss_mask
+    vloss = vloss.to(ori_device)
     return vloss, ploss, out_head
 
 @torch.no_grad()
@@ -380,13 +388,17 @@ if is_warmup:
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=num_warmup_steps,
                                                 num_training_steps=total_steps)
 
+    if args.checkpoint is not None:#[Modify]
+        checkpoint_path = args.checkpoint
+        accelerator.print(f"Loading checkpoint from {checkpoint_path}")
+        accelerator.load_state(checkpoint_path)
+        checkpoint_step = int(checkpoint_path.split("state_")[-1])
+        num_epochs = num_epochs + checkpoint_step
+        accelerator.print(f"New epoch is {num_epochs}")
     model, optimizer, train_loader, test_loader, scheduler = accelerator.prepare(
         model, optimizer, train_loader, test_loader, scheduler
     )
     head = accelerator1.prepare(head)
-    # model,head, optimizer, train_loader, test_loader, scheduler = accelerator.prepare(
-    #     model, head, optimizer, train_loader, test_loader, scheduler
-    # )
 else:
     model, head, optimizer, train_loader, test_loader = accelerator.prepare(
         model, head, optimizer, train_loader, test_loader
@@ -413,7 +425,7 @@ for epoch in range(num_epochs + 1):
                 target_p = nn.Softmax(dim=2)(target_head)
                 target_p = target_p.detach()
             loss_mask = data["loss_mask"][:, :, None]
-            vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask,head)
+            vloss, ploss, out_head = compute_loss(data["target"], target_p, predict, loss_mask, head)
             loss = train_config["v_w"] * vloss + train_config["p_w"] * ploss
             del ploss, vloss, target_p, predict
             ori_device = loss.device

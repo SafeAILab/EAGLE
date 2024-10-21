@@ -1944,6 +1944,451 @@ class ModelEagle(nn.Module):
 
 
     @torch.no_grad()
+    def topK_genrate_lpfeagle(self, hidden_states, input_ids, head, logits_processor, lpfrog_layer):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens
+        depth = self.depth
+        top_k = self.top_k
+
+        sample_token = input_ids[:, -1]
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+
+        input_ids = input_ids[:, 1:]
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]#40
+        self.reset()
+
+        
+        # with Timer("draft many"): normal
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden_norm, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden_norm, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        #lpfrog
+        if hasattr(self, "stable_kv_lpf") and self.stable_kv_lpf is not None:
+            kv_len_lpf = self.stable_kv_lpf[0][0].shape[2]
+            out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(hidden_states, input_ids=input_ids[:, kv_len_lpf:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(hidden_states, input_ids=input_ids, use_cache=True)
+        
+        self.stable_kv = past_key_values
+        self.stable_kv_lpf = past_key_values_lpf
+        #listize
+        # last_hidden_list = [out_hidden[:, -1] for out_hidden in out_hidden_list]
+        last_hidden = out_hidden_norm[:, -1]
+        last_headout = head(last_hidden)
+        last_p = self.logsoftmax(last_headout)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values#这里是选取点#[1,3]
+        scores = topk_p[0]#parents scores
+        scores_list.append(scores[None])
+        ss_token.append(topk_index)
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        #==========================
+        #处理lpf层
+        last_hidden_lpfrog = out_hidden_lpfrog[:, -1]
+        last_headout_lpfrog = head(last_hidden_lpfrog)
+        last_p_lpfrog = self.logsoftmax(last_headout_lpfrog)
+        predict_p = last_p_lpfrog
+        #==========================
+        #as eagle
+        top_lpfrog = torch.topk(predict_p, top_k, dim=-1)
+        topk_index_lpfrog, _ = top_lpfrog.indices, top_lpfrog.values
+
+        input_ids = torch.cat((topk_index,topk_index_lpfrog),dim=-1)
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        input_hidden_lpfrog = last_hidden_lpfrog[None].repeat(1, top_k, 1)
+        input_hidden = torch.cat((input_hidden,input_hidden_lpfrog),dim=1)
+        
+        tree_mask = self.tree_mask_init
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        base_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        i = 0
+        #===========LLM推理结束
+        for forward_count in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids #位置更新
+            out_hidden_norm, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            #预处理阶段
+            last_normheadout = head(out_hidden_norm[0])
+            last_leapfrogheadout = head(out_hidden_lpfrog[0])
+            last_norm_p = self.logsoftmax(last_normheadout)#torch.Size([3, 32000])
+            last_leapfrog_p = self.logsoftmax(last_leapfrogheadout)
+            #切成四份
+            last_now_norm_p = last_norm_p[:top_k,:]
+            last_future_norm_p = last_norm_p[top_k:,:]
+            last_now_leapfrog_p = last_leapfrog_p[:top_k,:]
+            last_future_leapfrog_p = last_leapfrog_p[top_k:,:]
+            #==========================输入上次节点在每行的相对索引topk_cs_index作为父节点
+            parents = self.make_parents(i, topk_cs_index)
+            parents_list.append(parents)
+            #第一层
+            scores_list, ss_token, idx_norm, now_norm_scores,_= self.compute_kl_and_update_scores(
+                last_now_norm_p, predict_p, scores, scores_list, ss_token)
+            i += 1
+            #==========================对第二层的预处理
+            #将匹配的那跳步预测作为下次对比项
+            predict_p = last_now_leapfrog_p[idx_norm]
+            scores = now_norm_scores[idx_norm][0]
+            idx_norm = idx_norm.to(base_index.device)
+            #获取选择节点在当前层的相对位置，选择节点是连续的
+            topk_cs_index = base_index + idx_norm * top_k
+            #==========================
+            #第二层
+            scores_list, ss_token, idx_lpfrog, future_norm_scores,topk_future_norm_index= self.compute_kl_and_update_scores(
+                last_future_norm_p, predict_p, scores, scores_list, ss_token)
+            #==========================输入上次节点在每行的相对索引topk_cs_index作为父节点
+            parents = self.make_parents(i, topk_cs_index)
+            parents_list.append(parents)
+            i += 1
+            #==========================对第未来层的预处理
+            #将匹配的那跳步预测作为下次对比项
+            predict_p = last_future_leapfrog_p[idx_lpfrog]
+            scores = future_norm_scores[idx_lpfrog][0]
+            idx_lpfrog = idx_lpfrog.to(base_index.device)
+            #获取选择节点在当前层的相对位置，选择节点是连续的
+            topk_cs_index = base_index + idx_lpfrog * top_k
+            #==========================mask构建
+            #下一次的id都相同，都出自同一个父亲节点，掩码为
+            output_id_future = idx_lpfrog.repeat(top_k) + 3
+            sub_tree_mask = torch.cat((tree_mask[:, :, output_id_future], tree_mask[:, :, output_id_future]), dim=2)
+            tree_mask = torch.cat((sub_tree_mask, self.tree_mask_init), dim=3)
+            #==========================
+            #处理future leapfrog和now leapfrog
+            top_future_leapfrog = torch.topk(last_future_leapfrog_p, top_k, dim=-1)
+            topk_future_leapfrog_index, _ = top_future_leapfrog.indices, top_future_leapfrog.values
+            
+            #选择匹配项作为下次的预测token
+            chosen_now_leapfrog = topk_future_norm_index[idx_lpfrog]
+            chosen_future_leapfrog = topk_future_leapfrog_index[idx_lpfrog]
+            
+            input_ids = torch.cat((chosen_now_leapfrog,chosen_future_leapfrog),dim=1)
+            input_hidden_now = out_hidden_lpfrog[:,idx_lpfrog,:].repeat(1, top_k, 1)
+            input_hidden_future = out_hidden_lpfrog[:,idx_lpfrog+top_k,:].repeat(1, top_k, 1)
+            input_hidden = torch.cat((input_hidden_now,input_hidden_future),dim=1)
+            
+            len_posi += 2#推理了俩层,当然加2
+
+        #总树topk
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        #如何去做一个draft_tokens, 考虑top_scores_index如何构建
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        #树的构建
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # 总mask构建
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True#根节点都看得见
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1#推理链码
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()#节点的深度
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+
+    def top_match(
+        self, last_norm_p, predict_p,
+        scores,
+    ):
+        top_k = self.top_k
+        #分布取topk
+        top_norm = torch.topk(last_norm_p, top_k, dim=-1)
+        topk_norm_index, topk_norm_p = top_norm.indices, top_norm.values
+        norm_scores = topk_norm_p + scores[:, None]
+        
+        topk_cs = torch.topk(norm_scores.view(-1), top_k, dim=-1)
+        topk_cs_index, topk_cs_p = topk_cs.indices, topk_cs.values
+        #得到topk的token
+        topk_cs_token = topk_norm_index.view(-1)[topk_cs_index]
+        #chose topk, no matter which predict
+        top_predict = torch.topk(predict_p.view(-1), top_k, dim=-1)
+        top_predict_index, _ = top_predict.indices, top_predict.values
+        #检索now_norm中是否有token在predict里面
+        mask = torch.isin(topk_cs_token, top_predict_index)
+        index = torch.nonzero(mask).view(-1)
+        return index, norm_scores, topk_cs_p, topk_cs_index, topk_norm_index
+
+    @torch.no_grad()
+    def topK_genrate_topmatch(self, hidden_states, input_ids, head, logits_processor, lpfrog_layer):
+
+        input_ids = input_ids.to(hidden_states.device)
+        total_tokens = self.total_tokens
+        depth = self.depth
+        top_k = self.top_k
+
+        sample_token = input_ids[:, -1]
+
+        scores_list = []
+        parents_list = []
+        ss_token = []
+
+        input_ids = input_ids[:, 1:]
+        input_ids = input_ids.to(hidden_states.device)
+
+        len_posi = input_ids.shape[1]#40
+        self.reset()
+
+        
+        # with Timer("draft many"): normal
+        if hasattr(self, "stable_kv") and self.stable_kv is not None:
+            kv_len = self.stable_kv[0][0].shape[2]
+            out_hidden_norm, past_key_values = self(hidden_states, input_ids=input_ids[:, kv_len:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden_norm, past_key_values = self(hidden_states, input_ids=input_ids, use_cache=True)
+        #lpfrog
+        if hasattr(self, "stable_kv_lpf") and self.stable_kv_lpf is not None:
+            kv_len_lpf = self.stable_kv_lpf[0][0].shape[2]
+            out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(hidden_states, input_ids=input_ids[:, kv_len_lpf:],
+                                               past_key_values=self.stable_kv, use_cache=True)
+        else:
+            out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(hidden_states, input_ids=input_ids, use_cache=True)
+        
+        self.stable_kv = past_key_values
+        self.stable_kv_lpf = past_key_values_lpf
+        #listize
+        # last_hidden_list = [out_hidden[:, -1] for out_hidden in out_hidden_list]
+        last_hidden = out_hidden_norm[:, -1]
+        last_headout = head(last_hidden)
+        last_p = self.logsoftmax(last_headout)
+        top = torch.topk(last_p, top_k, dim=-1)
+        topk_index, topk_p = top.indices, top.values#这里是选取点#[1,3]
+        scores = topk_p[0]#parents scores
+        scores_list.append(scores[None])
+        ss_token.append(topk_index)
+        parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
+        #==========================
+        #处理lpf层
+        last_hidden_lpfrog = out_hidden_lpfrog[:, -1]
+        last_headout_lpfrog = head(last_hidden_lpfrog)
+        last_p_lpfrog = self.logsoftmax(last_headout_lpfrog)
+        predict_p = last_p_lpfrog
+        #==========================
+        #as eagle
+        top_lpfrog = torch.topk(predict_p, top_k, dim=-1)
+        topk_index_lpfrog, _ = top_lpfrog.indices, top_lpfrog.values
+
+        input_ids = torch.cat((topk_index,topk_index_lpfrog),dim=-1)
+        input_hidden = last_hidden[None].repeat(1, top_k, 1)
+        input_hidden_lpfrog = last_hidden_lpfrog[None].repeat(1, top_k, 1)
+        input_hidden = torch.cat((input_hidden,input_hidden_lpfrog),dim=1)
+        
+        tree_mask = self.tree_mask_init
+        topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        base_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
+        i = 0
+        #===========LLM推理结束
+        for forward_count in range(depth):
+            self.tree_mask = tree_mask
+            position_ids = len_posi + self.position_ids #位置更新
+            out_hidden_norm, past_key_values = self(input_hidden, input_ids=input_ids, past_key_values=past_key_values,
+                                               position_ids=position_ids, use_cache=True)
+            #预处理阶段
+            last_normheadout = head(out_hidden_norm[0])
+            last_norm_p = self.logsoftmax(last_normheadout)#torch.Size([3, 32000])
+            #切成四份
+            last_now_norm_p = last_norm_p[:top_k,:]
+            last_future_norm_p = last_norm_p[top_k:,:]
+            #==========================输入上次节点在每行的相对索引topk_cs_index作为父节点
+            parents = self.make_parents(i, topk_cs_index)
+            parents_list.append(parents)
+            #第一层选择
+            idx_norm, now_norm_scores, topk_cs_p, topk_cs_index, topk_n_norm_index = self.top_match(
+                last_now_norm_p, predict_p, scores)
+            #第一层选择
+            scores_list.append(now_norm_scores)
+            ss_token.append(topk_n_norm_index)
+            i += 1
+            #第一层lpfrog
+            out_ids = topk_cs_index // top_k
+            #==========================判断是否要进入第二层
+            #第一层扩展
+            if idx_norm.shape == 0:#匹配失败，没有token在其中，退化为eagle
+                scores = topk_cs_p
+                out_ids = topk_cs_index // top_k
+                input_hidden = out_hidden_norm[:, out_ids]
+                input_ids = topk_n_norm_index.view(-1)[topk_cs_index][None]
+                tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
+                len_posi += 1
+            else:#match successully
+                out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(input_hidden, input_ids=input_ids, past_key_values=past_key_values_lpf,
+                                               position_ids=position_ids, use_cache=True)
+                #1/get match idx to topk_cs_index
+                topk_cs_index = idx_norm[None]
+                #2/topk_cs_index get scores so that become the parents scores
+                scores = now_norm_scores[topk_cs_index]
+                #3/due to chosen those already forword, so get the sub_P and get topk
+                top_future = torch.topk(last_future_norm_p[topk_cs_index], top_k, dim=-1)
+                top_future_token, top_future_p = top_future.indices, top_future.values
+                #4/the topk should be select
+                top_f_cs_score = top_future_p + scores
+                scores_list.append(top_f_cs_score)
+                ss_token.append(top_future_token)
+                #5/You can notice if matching, the topk_cs_index also lpf forward, so match again.
+                #but is match from future_norm_matching
+                # predict_p = 
+                idx_norm, now_norm_scores, topk_cs_p, topk_cs_index, topk_n_norm_index = self.top_match(
+                    last_future_norm_p[topk_cs_index], predict_p, scores)
+                #==========================#第二层选择
+                
+                #选择将要扩展的点，和eagle一样
+                top_cs_future = torch.topk(top_f_cs_score.view(-1), top_k, dim=-1)
+                top_f, top_fp_score =top_cs_future.indices, top_cs_future.values
+                #选择器分数进行承接
+                scores = top_fp_score
+                out_ids = topk_cs_index // top_k
+                #找到对应的影藏层
+                input_hidden = out_hidden_norm[:,out_ids+top_k]
+                input_ids = top_future_token.view(-1)[topk_cs_index][None]
+                tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
+                out_hidden_lpfrog, past_key_values_lpf = lpfrog_layer(input_hidden, input_ids=input_ids, past_key_values=past_key_values_lpf,
+                                               position_ids=position_ids, use_cache=True)
+                last_leapfrogheadout = head(out_hidden_lpfrog[0])
+                last_leapfrog_p = self.logsoftmax(last_leapfrogheadout)
+                last_now_leapfrog_p = last_leapfrog_p[:top_k,:]
+                last_future_leapfrog_p = last_leapfrog_p[top_k:,:]
+                len_posi += 2#推理了俩层,当然加2
+
+        #总树topk
+        scores_list = torch.cat(scores_list, dim=0).view(-1)
+        ss_token_list = torch.cat(ss_token, dim=0).view(-1)
+        top_scores = torch.topk(scores_list, total_tokens, dim=-1)
+        top_scores_index = top_scores.indices
+        top_scores_index = torch.sort(top_scores_index).values
+
+        #如何去做一个draft_tokens, 考虑top_scores_index如何构建
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+
+        #树的构建
+
+        draft_parents = torch.cat(parents_list, dim=0)[top_scores_index // top_k].long()
+        mask_index = torch.searchsorted(top_scores_index, draft_parents - 1, right=False)
+        # mask_index[(top_scores_index[mask_index]!=draft_parents - 1)]=-1
+        mask_index[draft_parents == 0] = -1
+        mask_index = mask_index + 1
+        mask_index_list = mask_index.tolist()
+        # 总mask构建
+        tree_mask = torch.eye(total_tokens + 1).bool()
+        tree_mask[:, 0] = True#根节点都看得见
+        for i in range(total_tokens):
+            tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
+
+        tree_position_ids = torch.sum(tree_mask, dim=1) - 1
+
+        tree_mask = tree_mask.float()[None, None]
+        draft_tokens = draft_tokens[None]
+
+        del parents_list, scores_list, ss_token, ss_token_list, draft_parents
+
+        # with Timer("retrieve"):
+
+        max_depth = torch.max(tree_position_ids) + 1
+        noleaf_index = torch.unique(mask_index).tolist()
+        noleaf_num = len(noleaf_index) - 1
+        leaf_num = total_tokens - noleaf_num
+
+        retrieve_indices = torch.zeros(leaf_num, max_depth.item(), dtype=torch.long) - 1#推理链码
+        retrieve_indices = retrieve_indices.tolist()
+
+        rid = 0
+        position_ids_list = tree_position_ids.tolist()#节点的深度
+
+        for i in range(total_tokens + 1):
+            if i not in noleaf_index:
+                cid = i
+                depth = position_ids_list[i]
+                for j in reversed(range(depth + 1)):
+                    retrieve_indices[rid][j] = cid
+                    cid = mask_index_list[cid - 1]
+                rid += 1
+
+        if logits_processor is not None:
+            maxitem = total_tokens + 5
+
+            def custom_sort(lst):
+                # sort_keys=[len(list)]
+                sort_keys = []
+                for i in range(len(lst)):
+                    sort_keys.append(lst[i] if lst[i] >= 0 else maxitem)
+                return sort_keys
+
+            retrieve_indices = sorted(retrieve_indices, key=custom_sort)
+
+        retrieve_indices = torch.tensor(retrieve_indices, dtype=torch.long)
+        del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
+        tree_position_ids = tree_position_ids.to(hidden_states.device)
+
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+
+    @torch.no_grad()
     def acc(self, data, head, max_length=5):
         hidden_states = data["hidden_states"]
         input_ids = data["input_ids"]
