@@ -80,6 +80,7 @@ Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla
 - [x] Support more LLMs such as Mixtral 8x7B.
 - [x] Support LLaMA-3.
 - [x] Support Qwen-2.
+- [ ] EAGLE-3 (please stay tuned).
 
 ## The default main branch is the implementation of EAGLE-2. For using EAGLE-1, please switch to the v1 branch.
 
