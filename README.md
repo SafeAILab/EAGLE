@@ -64,7 +64,7 @@ Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla
 
 **2024.6.27**: EAGLE-2 is released.
 
-**2024.5.25**: EAGLE is merged with <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM library for PyTorch</a>.
+**2024.5.25**: EAGLE is merged with <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>.
 
 **2024.5.9**: EAGLE is merged with <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>.
 
