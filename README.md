@@ -56,9 +56,9 @@ EAGLE-2 uses the confidence scores from the draft model to approximate acceptanc
 Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla autoregressive decoding on an A100 GPU.
 
 ## Update
-**2024.12.25**: EAGLE is supported by AWS's <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">NeuronX Distributed Core</a>.
+**2024.12.25**: EAGLE is merged with AWS's <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">NeuronX Distributed Core</a>.
 
-**2024.11.19**: EAGLE is supported by NVIDIA's <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">TensorRT-LLM</a>.
+**2024.11.19**: EAGLE is merged with NVIDIA's <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">TensorRT-LLM</a>.
 
 **2024.8.23**: EAGLE is merged with <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>.
 
