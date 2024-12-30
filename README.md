@@ -62,30 +62,19 @@ EAGLE has been merged in the following maintream LLM serving frameworks (listed 
 - <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>
 - <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
 - <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
-- Ongoing: <a href="https://github.com/sgl-project/sglang/pull/2150">SGLang</a>
+- <a href="https://github.com/sgl-project/sglang/pull/2150">SGLang</a> (ongoing)
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
 - <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>
 
 
 ## Update
-**2024.12.25**: EAGLE is merged with AWS's <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">NeuronX Distributed Core</a>.
-
-**2024.11.19**: EAGLE is merged with NVIDIA's <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">TensorRT-LLM</a>.
-
-**2024.8.23**: EAGLE is merged with <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>.
-
 **2024.8.8**: We now support Qwen-2.
 
 **2024.6.27**: EAGLE-2 is released.
 
-**2024.5.25**: EAGLE is merged with <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>.
-
-**2024.5.9**: EAGLE is merged with <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>.
-
 **2024.2.25**: EAGLE is certified by the <a href="https://github.com/hemingkx/Spec-Bench/blob/main/Leaderboard.md">third-party</a> evaluation as the fastest speculative method.
 
 **2024.1.17**: We now support [Mixtral-8x7B-Instruct](https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1).
-
 
 **2023.12.8**: EAGLE v1.0 is released.
 
