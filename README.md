@@ -56,13 +56,15 @@ EAGLE-2 uses the confidence scores from the draft model to approximate acceptanc
 Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla autoregressive decoding on an A100 GPU.
 
 ## Support
-EAGLE has been merged in the following maintream LLM serving frameworks.
+EAGLE has been merged in the following maintream LLM serving frameworks (listed in alphabetical order).
 
 - <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">AWS NeuronX Distributed Core</a>
+- <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>
+- <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
+- <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
+- Ongoing: <a href="https://github.com/sgl-project/sglang/pull/2150">SGLang</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
 - <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>
-- <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
-- <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>
 
 
 ## Update
