@@ -63,7 +63,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
 - <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
-- <a href="https://github.com/sgl-project/sglang/pull/2150">SGLang</a> (ongoing)
+- <a href="https://github.com/sgl-project/sglang/pull/2150">SGLang</a>
 - <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>
 
 
