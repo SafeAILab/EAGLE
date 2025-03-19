@@ -106,6 +106,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 ## Contents
 
 - [Setup & Installation](#setup--installation)
+- [EAGLE-3 Weights](#eagle-3-weights)
 - [EAGLE Weights](#eagle-weights)
 - [Inference](#inference)
   - [With UI](#with-ui)
