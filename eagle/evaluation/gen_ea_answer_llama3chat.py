@@ -8,7 +8,7 @@ import json
 import os
 script_dir = os.path.dirname(__file__)
 parent_dir = os.path.dirname(script_dir)
-#os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "7"
 from accelerate.utils import set_seed
 set_seed(0)
 
@@ -18,9 +18,14 @@ import shortuuid
 from fastchat.llm_judge.common import load_questions
 from tqdm import tqdm
 
-from ..model.ea_model import EaModel
-from ..model.kv_cache import initialize_past_key_values
-from ..model.utils import *
+try:
+    from ..model.ea_model import EaModel
+    from ..model.kv_cache import initialize_past_key_values
+    from ..model.utils import *
+except:
+    from eagle.model.ea_model import EaModel
+    from eagle.model.kv_cache import initialize_past_key_values
+    from eagle.model.utils import *
 
 
 
@@ -317,10 +322,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="down_checkpoints/LC70B",
+        default="/home/lyh/weights/hf/eagle3/llama31chat/8B/",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/70B/",
+    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama31chat/8B/",
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"

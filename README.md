@@ -3,6 +3,7 @@
 <p align="center">
 | <a href="https://arxiv.org/pdf/2401.15077.pdf"><b>Paper (EAGLE)</b></a> | 
 <a href="https://arxiv.org/pdf/2406.16858"><b>Paper (EAGLE-2)</b></a> |
+<a href="https://arxiv.org/pdf/2503.01840"><b>Paper (EAGLE-3)</b></a> |
 <a href="https://sites.google.com/view/
 eagle-llm"><b>Blog</b></a> |
 </p>
@@ -27,7 +28,7 @@ eagle-llm"><b>Blog</b></a> |
 ##
 
 <p align="center">
-  <img src="./figs/eagle2_t0.jpg" alt="benchmark" width="790">
+  <img src="./figs/eagle3r.jpg" alt="benchmark" width="790">
 </p>
 
 EAGLE (Extrapolation Algorithm for Greater Language-model Efficiency) is a new baseline for fast decoding of Large Language Models (LLMs) with provable performance maintenance. This approach involves extrapolating the second-top-layer contextual feature vectors of LLMs, enabling a significant boost in generation efficiency. 
@@ -48,12 +49,22 @@ EAGLE-2 uses the confidence scores from the draft model to approximate acceptanc
   - **4x** faster than vanilla decoding (13B).
   - **1.4x** faster than EAGLE-1 (13B).
 
-<p align="center">
-  <img src="./figs/eagle2.gif" alt="demogif">
-</p>
+EAGLE-3 removes the feature prediction constraint in EAGLE and simulates this process during training using training-time testing. Considering that top-layer features are limited to next-token prediction, EAGLE-3 replaces them with a fusion of low-, mid-, and high-level semantic features. 
+EAGLE-3 further improves generation speed while ensuring lossless performance.
 
+- EAGLE-3 is:
+  - **5.6** faster than vanilla decoding (13B).
+  - **1.8x** faster than EAGLE-1 (13B).
 
-Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla autoregressive decoding on an A100 GPU.
+[//]: # (<p align="center">)
+
+[//]: # (  <img src="./figs/eagle2.gif" alt="demogif">)
+
+[//]: # (</p>)
+
+[//]: # ()
+[//]: # ()
+[//]: # (Using EAGLE-2, the inference speed on 2 RTX 3060 GPUs can be faster than vanilla autoregressive decoding on an A100 GPU.)
 
 ## Support
 EAGLE has been merged in the following mainstream LLM serving frameworks (listed in alphabetical order).
@@ -68,6 +79,8 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 
 
 ## Update
+**2025.3.19**: EAGLE-3 is released.
+
 **2024.8.8**: We now support Qwen-2.
 
 **2024.6.27**: EAGLE-2 is released.
@@ -86,9 +99,9 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - [x] Support LLaMA-3.
 - [x] Support Qwen-2.
 - [x] Support vLLM (please check <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>'s implementation).
-- [ ] EAGLE-3 (coming in a few weeks).
+- [x] EAGLE-3.
 
-## The default main branch is the implementation of EAGLE-2. For using EAGLE-1, please switch to the v1 branch.
+## The default main branch is the implementation of EAGLE-3 and EAGLE-2. For using EAGLE-1, please switch to the v1 branch.
 
 ## Contents
 
@@ -112,14 +125,22 @@ git clone https://github.com/SafeAILab/EAGLE.git
 cd EAGLE
 pip install -r requirements.txt
 ```
+## EAGLE-3 Weights
+
+| Base Model            | EAGLE-3 on Hugging Face                                                             | Base Model                   | EAGLE-3 on Hugging Face                                                             | 
+|-----------------------|-------------------------------------------------------------------------------------|------------------------------|-------------------------------------------------------------------------------------|
+| Vicuna-13B-v1.3       | [yuhuili/EAGLE3-Vicuna1.3-13B](https://huggingface.co/yuhuili/EAGLE3-Vicuna1.3-13B) | LLaMA3.1-Instruct 8B         | [yuhuili/EAGLE-LLaMA3.1-Instruct-8B](https://huggingface.co/yuhuili/EAGLE-LLaMA3.1-Instruct-8B) |
+| LLaMA3.3-Instruct 70B | [yuhuili/EAGLE3-LLaMA3.3-Instruct-70B](https://huggingface.co/yuhuili/EAGLE3-LLaMA3.3-Instruct-70B) | DeepSeek-R1-Distill-LLaMA 8B | [yuhuili/EAGLE3-DeepSeek-R1-Distill-LLaMA-8B](https://huggingface.co/yuhuili/EAGLE3-DeepSeek-R1-Distill-LLaMA-8B) |
 
 
 ## EAGLE Weights
 
+*Note:* The current code defaults to using EAGLE-3. If you want to use EAGLE weights, please specify `use_eagle3=False` in `EaModel.from_pretrained`.
+
 *Note:* When Qwen2 is the target model, please use bf16 precision instead of fp16 to avoid numerical overflow. The training dataset for the draft model of Qwen2 is ShareGPT, which has removed non-English data. Therefore, if you want to use it on non-English data such as Chinese, please train with the corresponding data.
 
 
-Compared to EAGLE, EAGLE-2 does not require additional training and uses the same weights.
+[//]: # (Compared to EAGLE, EAGLE-2 does not require additional training and uses the same weights.)
 
 | Base Model  | EAGLE on Hugging Face  | \# EAGLE Parameters | Base Model  | EAGLE on Hugging Face  | \# EAGLE Parameters |
 |------|------|------|------|------|------|
@@ -224,7 +245,7 @@ A heartfelt thank you to all our contributors.
 
 
 ## Reference
-For technical details and full experimental results, please check [the paper of EAGLE](https://arxiv.org/pdf/2401.15077.pdf) and [the paper of EAGLE-2](https://arxiv.org/pdf/2406.16858).
+For technical details and full experimental results, please check [the paper of EAGLE](https://arxiv.org/pdf/2401.15077.pdf), [the paper of EAGLE-2](https://arxiv.org/pdf/2406.16858), and [the paper of EAGLE-3](https://arxiv.org/pdf/2503.01840).
 ```
 @inproceedings{li2024eagle, 
 	author = {Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang}, 
@@ -237,6 +258,15 @@ For technical details and full experimental results, please check [the paper of 
 	title = {{EAGLE-2}: Faster Inference of Language Models with Dynamic Draft Trees}, 
 	booktitle = {Empirical Methods in Natural Language Processing},
 	year = {2024}
+}
+@misc{li2025eagle3scalinginferenceacceleration,
+      title={EAGLE-3: Scaling up Inference Acceleration of Large Language Models via Training-Time Test}, 
+      author={Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang},
+      year={2025},
+      eprint={2503.01840},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL},
+      url={https://arxiv.org/abs/2503.01840}, 
 }
 ```
 

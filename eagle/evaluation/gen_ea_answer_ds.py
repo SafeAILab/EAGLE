@@ -133,15 +133,12 @@ def get_model_answers(
     for _ in range(3):
         torch.manual_seed(0)
 
-        messages = [
-            {"role": "system",
-             "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
-        ]
+        messages = []
         turns = []
         idxs = []
         new_tokens = []
         wall_time = []
-        for j in range(len(question["turns"])):
+        for j in range(1):
             qs = question["turns"][j]
             messages.append({
                 "role": "user",
@@ -158,7 +155,7 @@ def get_model_answers(
             torch.cuda.synchronize()
             start_time = time.time()
 
-            output_ids, new_token, idx = model.naivegenerate(
+            output_ids, new_token, idx = model.eagenerate(
                 torch.as_tensor(input_ids).cuda(),
                 temperature=temperature,
                 log=True,
@@ -215,15 +212,12 @@ def get_model_answers(
         choices = []
         for i in range(num_choices):
             torch.manual_seed(i)
-            messages = [
-                {"role": "system",
-                 "content": "You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe.  Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."},
-            ]
+            messages = []
             turns = []
             idxs = []
             new_tokens = []
             wall_time = []
-            for j in range(len(question["turns"])):
+            for j in range(1):
                 qs = question["turns"][j]
                 messages.append({
                     "role": "user",
@@ -240,7 +234,7 @@ def get_model_answers(
                 torch.cuda.synchronize()
                 start_time = time.time()
 
-                output_ids, new_token, idx = model.naivegenerate(
+                output_ids, new_token, idx = model.eagenerate(
                     torch.as_tensor(input_ids).cuda(),
                     temperature=temperature,
                     log=True,
@@ -322,10 +316,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="/home/lyh/weights/hf/eagle3/llama33chat/70B/",
+        default="/home/lyh/weights/hf/eagle3/DSL/8B3/",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/llama33chat/70B/",
+    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/DSL/8B/",
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"

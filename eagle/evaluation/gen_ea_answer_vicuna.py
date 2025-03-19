@@ -16,9 +16,14 @@ from fastchat.llm_judge.common import load_questions
 from fastchat.model import get_conversation_template
 from tqdm import tqdm
 
-from ..model.ea_model import EaModel
-from ..model.kv_cache import initialize_past_key_values
-from ..model.utils import *
+try:
+    from ..model.ea_model import EaModel
+    from ..model.kv_cache import initialize_past_key_values
+    from ..model.utils import *
+except:
+    from eagle.model.ea_model import EaModel
+    from eagle.model.kv_cache import initialize_past_key_values
+    from eagle.model.utils import *
 
 
 
@@ -282,10 +287,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ea-model-path",
         type=str,
-        default="down_checkpoints/LC70B",
+        default="/home/v-yuhuili/b/res/v13/h0/checkpoints/state_1/",
         help="The path to the weights. This can be a local folder or a Hugging Face repo ID.",
     )
-    parser.add_argument("--base-model-path", type=str, default="/home/lyh/weights/hf/llama2chat/70B/",
+    parser.add_argument("--base-model-path", type=str, default="/home/v-yuhuili/b/weights/vicuna/13B/",
                         help="1")
     parser.add_argument(
         "--load-in-8bit", action="store_false", help="Use 8-bit quantization"

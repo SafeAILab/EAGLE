@@ -205,14 +205,9 @@ class LlamaAttention(nn.Module):
                 f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
                 f" and `num_heads`: {self.num_heads})."
             )
-        if hasattr(config, "qkv_bias"):
-            self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.qkv_bias)
-            self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.qkv_bias)
-            self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.qkv_bias)
-        else:
-            self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-            self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-            self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+        self.q_proj = nn.Linear(self.hidden_size * 2, self.num_heads * self.head_dim, bias=False)
+        self.k_proj = nn.Linear(self.hidden_size * 2, self.num_key_value_heads * self.head_dim, bias=False)
+        self.v_proj = nn.Linear(self.hidden_size * 2, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
         self._init_rope()
 
@@ -388,19 +383,23 @@ class LlamaRMSNorm(nn.Module):
         return self.weight * hidden_states.to(input_dtype)
 
 
-class LlamaDecoderLayer(nn.Module):
-    def __init__(self, config, index):
+class LlamaDecoderLayeremb(nn.Module):
+    def __init__(self, config, last=True):
         super().__init__()
         self.hidden_size = config.hidden_size
         self.self_attn = LlamaAttention(config=config)
         self.mlp = LlamaMLP(config)
-        self.index = index
-        if self.index != 0:
-            self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.last = last
+        # self.fc = nn.Linear(config.hidden_size * 2, config.hidden_size)
+        self.hidden_norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        # if self.index!=0:
+
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
             self,
+            input_emb: torch.Tensor,
             hidden_states: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
             position_ids: Optional[torch.LongTensor] = None,
@@ -424,8 +423,13 @@ class LlamaDecoderLayer(nn.Module):
 
         residual = hidden_states
 
-        if self.index != 0:
-            hidden_states = self.input_layernorm(hidden_states)
+        hidden_states = self.hidden_norm(hidden_states)
+        input_emb = self.input_layernorm(input_emb)
+
+        hidden_states = torch.cat((input_emb, hidden_states), dim=-1)
+
+
+        # cache_hidden.append(hidden_states)
 
         # Self Attention
         hidden_states, self_attn_weights, present_key_value = self.self_attn(
@@ -455,13 +459,15 @@ class LlamaDecoderLayer(nn.Module):
         return outputs
 
 
-class I(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.dummy = nn.Parameter(torch.ones(1, dtype=torch.float32))
+@torch.no_grad()
+def padding(tensor, left=True):
+    zeropadding = torch.zeros_like(tensor[:, -1:])
+    if left:
+        tensor = torch.cat((zeropadding, tensor[:, :-1]), dim=1)
+    else:
+        tensor = torch.cat((tensor[:, 1:], zeropadding), dim=1)
+    return tensor
 
-    def forward(self, x):
-        return x + self.dummy - self.dummy  # (also tried x+self.dummy)
 
 
 def len_list(x, n):
@@ -471,13 +477,14 @@ def len_list(x, n):
 class Model(nn.Module):
     def __init__(self, config, load_emb=False, path=None, bias=True, total_tokens=63, depth=5, top_k=8, threshold=1.0):
         super().__init__()
-
+        self.config=config
         self.gradient_checkpointing = True
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
-        if load_emb:
+        self.lm_head=nn.Linear(config.hidden_size,config.draft_vocab_size,bias=False)
+        if load_emb and not hasattr(config, "target_hidden_size"):
             from safetensors import safe_open
             import json
             try:
@@ -506,11 +513,20 @@ class Model(nn.Module):
         # print("depth",depth)
         # print("top_k",top_k)
         # print("threshold",threshold)
-
-        self.layers = nn.ModuleList([LlamaDecoderLayer(config, index) for index in range(config.num_hidden_layers)])
-        self.fc = nn.Linear(2 * config.hidden_size, config.hidden_size, bias=bias)
-        self.act = ACT2FN[config.hidden_act]
+        self.hidden_size = config.hidden_size
+        self.midlayer = LlamaDecoderLayeremb(config)
+        if hasattr(config, "target_hidden_size"):
+            self.fc = nn.Linear(config.target_hidden_size * 3, self.hidden_size, bias=False)
+        else:
+            self.fc = nn.Linear(config.hidden_size * 3, self.hidden_size, bias=False)
+        self.norm=LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.logsoftmax = nn.LogSoftmax(dim=-1)
+
+        d2t=torch.zeros((config.draft_vocab_size),dtype=torch.long)
+        t2d=torch.zeros((config.vocab_size),dtype=torch.bool)
+        self.register_buffer("d2t", d2t)
+        self.register_buffer("t2d", t2d)
+
         for param in self.embed_tokens.parameters():
             param.requires_grad = False
 
@@ -607,46 +623,27 @@ class Model(nn.Module):
 
         # hidden_states=self.act(self.fc(torch.cat((inputs_embeds,hidden_states),dim=-1)))
         inputs_embeds = inputs_embeds.to(hidden_states.dtype)
-        hidden_states = self.fc(torch.cat((inputs_embeds, hidden_states), dim=-1))
+        if hidden_states.shape[-1]!=inputs_embeds.shape[-1]:
+            hidden_states = self.fc(hidden_states)
+        # hidden_states = self.fc(hidden_states)
 
         all_hidden_states = () if output_hidden_states else None
         next_decoder_cache = () if use_cache else None
 
-        for idx, decoder_layer in enumerate(self.layers):
-            if output_hidden_states:
-                all_hidden_states += (hidden_states,)
+        past_key_value = past_key_values[0] if past_key_values is not None else None
+        layer_outputs = self.midlayer(
+            input_emb=inputs_embeds,
+            hidden_states=hidden_states,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_value=past_key_value,
+            output_attentions=output_attentions,
+            use_cache=True,
+        )
+        if use_cache:
+            next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
+        hidden_states = layer_outputs[0]
 
-            past_key_value = past_key_values[idx] if past_key_values is not None else None
-
-            if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(decoder_layer),
-                    hidden_states,
-                    attention_mask,
-                    position_ids,
-                )
-            else:
-                layer_outputs = decoder_layer(
-                    hidden_states,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    past_key_value=past_key_value,
-                    output_attentions=output_attentions,
-                    use_cache=use_cache,
-                )
-
-            hidden_states = layer_outputs[0]
-
-            if use_cache:
-                next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)
 
         if use_cache:
             return hidden_states, next_decoder_cache
@@ -686,7 +683,8 @@ class Model(nn.Module):
         self.stable_kv = past_key_values
         last_hidden = out_hidden[:, -1]
 
-        last_headout = head(last_hidden)
+        # last_headout = head(last_hidden)
+        last_headout = self.lm_head(self.norm(last_hidden))
 
         last_p = self.logsoftmax(last_headout)
         top = torch.topk(last_p, top_k, dim=-1)
@@ -694,8 +692,12 @@ class Model(nn.Module):
         scores = topk_p[0]
         scores_list.append(scores[None])
         parents_list.append(torch.zeros(1, dtype=torch.long, device=scores.device))
-        ss_token.append(topk_index)
-        input_ids = topk_index
+        if self.config.vocab_size==self.config.draft_vocab_size:
+            ss_token.append(topk_index)
+            input_ids = topk_index
+        else:
+            ss_token.append(topk_index+self.d2t[topk_index])
+            input_ids = topk_index+self.d2t[topk_index]
         input_hidden = last_hidden[None].repeat(1, top_k, 1)
         tree_mask = self.tree_mask_init
         topk_cs_index = torch.arange(top_k, device=self.embed_tokens.weight.device)
@@ -716,7 +718,7 @@ class Model(nn.Module):
             parents = (topk_cs_index + bias)
             parents_list.append(parents)
 
-            last_headout = head(out_hidden[0])
+            last_headout = self.lm_head(self.norm(out_hidden[0]))
             last_p = self.logsoftmax(last_headout)
 
             top = torch.topk(last_p, top_k, dim=-1)
@@ -730,24 +732,17 @@ class Model(nn.Module):
 
             out_ids = topk_cs_index // top_k
             input_hidden = out_hidden[:, out_ids]
-            # with Timer("2index"):
-            #     in_ids = topk_cs_index % top_k
-            #     input_ids = topk_index[out_ids, in_ids][None]
-            # with Timer("1index"):
-            input_ids = topk_index.view(-1)[topk_cs_index][None]
-            # print(input_ids.equal(input_ids0))
 
-            ss_token.append(topk_index)
+            input_ids = topk_index.view(-1)[topk_cs_index][None]
+
+            if self.config.vocab_size == self.config.draft_vocab_size:
+                ss_token.append(topk_index)
+            else:
+                input_ids = input_ids + self.d2t[input_ids]
+                ss_token.append(topk_index+self.d2t[topk_index])
             scores_list.append(cu_scores)
             tree_mask = torch.cat((tree_mask[:, :, out_ids], self.tree_mask_init), dim=3)
 
-            # if self.threshold < 0 and cu_scores.max() < self.threshold:
-            #     break
-
-        # del parents_list,scores_list,ss_token
-        # return draft_tokens, mask_index,tree_mask,tree_position_ids
-
-        # with Timer("post"):
 
         scores_list = torch.cat(scores_list, dim=0).view(-1)
         ss_token_list = torch.cat(ss_token, dim=0).view(-1)
@@ -770,20 +765,7 @@ class Model(nn.Module):
         for i in range(total_tokens):
             tree_mask[i + 1].add_(tree_mask[mask_index_list[i]])
 
-        # with Timer("mask1"):
-        #     tree_mask0 = [[False for _ in range(total_tokens + 1)] for _ in range(total_tokens + 1)]
-        #     tree_mask0[0][0] = True
-        #     for i in range(total_tokens):
-        #         #tree_mask0[i + 1][0]=True
-        #         tree_mask0[i + 1][i + 1] = True
-        #         p=mask_index_list[i]
-        #         tree_mask0[i + 1][p] = True
-        #         while p:
-        #             p=mask_index_list[p-1]
-        #             tree_mask0[i + 1][p] = True
-        #     tree_mask0 = torch.tensor(tree_mask0, dtype=torch.bool)
-        #
-        # print(tree_mask0.equal(tree_mask))
+
         tree_position_ids = torch.sum(tree_mask, dim=1) - 1
 
         tree_mask = tree_mask.float()[None, None]
@@ -831,65 +813,7 @@ class Model(nn.Module):
 
         return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
 
-    @torch.no_grad()
-    def acc(self, data, head, max_length=5):
-        hidden_states = data["hidden_states"]
-        input_ids = data["input_ids"]
-        # attention_mask=data["attention_mask"]
-        loss_mask = data["loss_mask"]
-        sample_mask = data["sample_mask"]
-        target = data["target"]
-        total = [0 for _ in range(max_length)]
-        correct = [0 for _ in range(max_length)]
-        bs, sl = hidden_states.shape[0], hidden_states.shape[1]
-        target_headout = head(target)
-        hidden_states_headout = head(hidden_states)
 
-        for i in range(bs):
-            for j in range(sl):
-                if loss_mask[i, j] == 0:
-                    continue
-                single_hidden_states = hidden_states[i, :j]
-                single_input_ids = input_ids[i, :j]
-
-                single_hidden_states = single_hidden_states[None, :, :]
-                single_input_ids = single_input_ids[None, :]
-                for k in range(max_length):
-                    tmp_in_target_headout = hidden_states_headout[i, single_hidden_states.shape[1] - 1]
-                    tmp_out_target_headout = target_headout[i, single_hidden_states.shape[1] - 1]
-                    target_in_token = torch.argmax(tmp_in_target_headout)
-                    target_out_token = torch.argmax(tmp_out_target_headout)
-                    tmp_token = input_ids[i, single_hidden_states.shape[1] - 1]
-                    tmp_sample_mask = sample_mask[i, single_hidden_states.shape[1] - 1]
-                    if not (target_in_token == tmp_token):
-                        break
-                    out_hidden = self(single_hidden_states, input_ids=single_input_ids)
-                    last_hidden = out_hidden[:, -1]
-                    last_headout = head(last_hidden)
-                    token = torch.argmax(last_headout)
-                    total[k] += 1
-                    if token == target_out_token:
-                        correct[k] += 1
-                    else:
-                        for kk in range(k, max_length):
-                            total[kk] += 1
-                        break
-
-                    single_hidden_states = torch.cat((single_hidden_states, out_hidden[:, -1:]), dim=1)
-                    single_input_ids = torch.cat(
-                        (single_input_ids, torch.tensor([[token]]).to(single_input_ids.device)), dim=1)
-
-        acc = [correct[i] / total[i] for i in range(len(correct))]
-        return acc
-
-
-class Vhead(nn.Module):
-    def __init__(self, ins=6566, outs=32000):
-        super().__init__()
-        self.fc = nn.Linear(ins, outs, bias=False)
-
-    def forward(self, x):
-        return self.fc(x)
 
 
 import torch
