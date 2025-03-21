@@ -57,7 +57,7 @@ EAGLE-3 further improves generation speed while ensuring lossless performance.
   - **1.8x** faster than EAGLE-1 (13B).
 
 <p align="center">
-  <img src="./figs/e3.gif" alt="demogif">
+  <img src="./figs/e3.gif" alt="demogif" width="600">
 </p>
 
 
