@@ -56,11 +56,10 @@ EAGLE-3 further improves generation speed while ensuring lossless performance.
   - **5.6** faster than vanilla decoding (13B).
   - **1.8x** faster than EAGLE-1 (13B).
 
-[//]: # (<p align="center">)
+<p align="center">
+  <img src="./figs/e3.gif" alt="demogif">
+</p>
 
-[//]: # (  <img src="./figs/eagle2.gif" alt="demogif">)
-
-[//]: # (</p>)
 
 [//]: # ()
 [//]: # ()
