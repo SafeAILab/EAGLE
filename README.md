@@ -60,6 +60,8 @@ EAGLE-3 further improves generation speed while ensuring lossless performance.
   <img src="./figs/e3.gif" alt="demogif" width="600">
 </p>
 
+_Inference is conducted on 2x RTX 3090 GPUs at fp16 precision using the Vicuna 13B model._
+
 
 [//]: # ()
 [//]: # ()
