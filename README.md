@@ -275,4 +275,4 @@ For technical details and full experimental results, please check [the paper of 
 
 ## Acknowledgements
 
-This project has been influenced by many excellent projects in the LLM community, such as [Medusa](https://github.com/FasterDecoding/Medusa), [FastChat](https://github.com/lm-sys/FastChat), and others. The logo is designed by GPT-4. We also appreciate many valuable discussions with the SGLang team (Yineng Zhang, Lianmin Zheng, Ying Sheng, Ke Bao, James Liu and many others), Tianle Cai, Hao Zhang, Ziteng Sun, and others.
+This project has been influenced by many excellent projects in the LLM community, such as [Medusa](https://github.com/FasterDecoding/Medusa), [FastChat](https://github.com/lm-sys/FastChat), and others. The logo is designed by GPT-4. We also appreciate many valuable discussions with the SGLang team (James Liu, Ke Bao, Yineng Zhang, Lianmin Zheng, Ying Sheng and many others), Tianle Cai, Hao Zhang, Ziteng Sun, and others.
