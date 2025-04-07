@@ -409,6 +409,7 @@ def evaluate_posterior(
             sample_p = gtp
         else:
             gt_logits = logits[best_candidate, accept_length - 1]
+            gt_logits = logits_processor(None, gt_logits)[0]
             sample_p = torch.softmax(gt_logits, dim=0)
         return torch.tensor(best_candidate), accept_length - 1, sample_p
 
