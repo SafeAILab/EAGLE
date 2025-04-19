@@ -109,7 +109,8 @@ def get_model_answers(
         torch_dtype=torch.float16,
         low_cpu_mem_usage=True,
         # load_in_8bit=True,
-        device_map="auto"
+        device_map="auto",
+        use_eagle3=args.use_eagle3,
     )
 
     tokenizer = model.get_tokenizer()
@@ -368,7 +369,15 @@ if __name__ == "__main__":
         default="mc_sim_7b_63",
     )
 
+    parser.add_argument(
+        "--use-eagle3",
+        action="store_true"
+    )
+
     args = parser.parse_args()
+
+    for k,v in vars(args).items():
+        print(f"{k}={v}")
 
     args.model_id = args.model_id + "-temperature-" + str(args.temperature)
     if args.num_gpus_total // args.num_gpus_per_model > 1:
