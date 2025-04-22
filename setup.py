@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='eagle-llm',
-    version='1.2.1',
+    version='3.0.0',
     description='Accelerating LLMs by 3x with No Quality Loss',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
@@ -10,16 +10,16 @@ setup(
     url='https://github.com/SafeAILab/EAGLE',
     packages=find_packages(),
     install_requires=[
-        "torch",
-        "transformers",
-        "accelerate == 0.21.0",
-        "fschat == 0.2.31",
-        "gradio == 3.50.2",
-        "openai == 0.28.0",
-        "anthropic == 0.5.0",
-        "sentencepiece == 0.1.99",
-        "protobuf == 3.19.0",
-        "wandb"
+        'torch==2.0.1',
+        'transformers==4.46.2',
+        'accelerate==0.21.0',
+        'fschat==0.2.31',
+        'gradio==3.50.2',
+        'openai==0.28.0',
+        'anthropic==0.5.0',
+        'sentencepiece==0.1.99',
+        'protobuf==3.19.0',
+        'wandb'
     ],
     classifiers=[
         'Development Status :: 3 - Alpha',
@@ -28,5 +28,7 @@ setup(
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11'
     ],
 )
