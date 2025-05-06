@@ -49,7 +49,7 @@ from accelerate.utils import set_seed
 
 set_seed(0)
 accelerator = Accelerator(mixed_precision="fp16")
-from cnets import Model
+from cnets1 import Model
 from configs import EConfig
 from typing import Any, Dict, List
 
