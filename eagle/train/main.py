@@ -53,7 +53,7 @@ from accelerate.utils import set_seed
 set_seed(0)
 accelerator = Accelerator(mixed_precision='bf16',
                           gradient_accumulation_steps=train_config["gradient_accumulation_steps"])
-from ..model.cnets import Model
+from ..model.cnets1 import Model
 from ..model.configs import EConfig
 from typing import Any, Dict, List
 
