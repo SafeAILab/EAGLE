@@ -125,6 +125,8 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 ```bash
 git clone https://github.com/SafeAILab/EAGLE.git
 cd EAGLE
+python -m venv ~/venvs/ea_env
+source ~/venvs/ea_env/bin/activate
 pip install -r requirements.txt
 ```
 ## EAGLE-3 Weights
