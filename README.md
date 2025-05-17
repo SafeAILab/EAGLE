@@ -227,7 +227,7 @@ Copy the modeling_basemodelname.py from the Transformers library and proceed to 
 
 
 ## Evaluation
-You can test the speed of EAGLE on MT-bench using the following command. The models will be downloaded automatically and you may need to input your Huggingface tokenizer by ```bashhuggingface-cli login```.
+You can test the speed of EAGLE on MT-bench using the following command. The models will be downloaded automatically and you may need to input your Huggingface tokenizer by ```huggingface-cli login```.
 ```bash
 python -m eagle.evaluation.gen_ea_answer_llama3chat --ea-model-path yuhuili/EAGLE3-LLaMA3.1-Instruct-8B --base-model-path meta-llama/Llama-3.1-8B-Instruct --use_eagle3
 ```
