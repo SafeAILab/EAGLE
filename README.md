@@ -229,16 +229,11 @@ Copy the modeling_basemodelname.py from the Transformers library and proceed to 
 ## Evaluation
 You can test the speed of EAGLE on MT-bench using the following command.
 ```bash
-python -m eagle.evaluation.gen_ea_answer_vicuna(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of EAGLE weight]\ 
-		 --base-model-path [path of the original model]\
+python -m eagle.evaluation.gen_ea_answer_llama3chat --ea-model-path yuhuili/EAGLE3-LLaMA3.1-Instruct-8B --base-model-path meta-llama/Llama-3.1-8B-Instruct --use_eagle3
 ```
 If you need specific acceleration ratios, you will also need to run the following command to get the speed of vanilla auto-regression.
 ```bash
-python -m eagle.evaluation.gen_baseline_answer_vicuna\
-		(or gen_ea_answer_vicuna_llama2chat)\
-		 --ea-model-path [path of EAGLE weight]\ 
-		 --base-model-path [path of the original model]\
+python -m eagle.evaluation.gen_baseline_answer_llama3chat --ea-model-path yuhuili/EAGLE3-LLaMA3.1-Instruct-8B --base-model-path meta-llama/Llama-3.1-8B-Instruct
 ```
 The above two commands will each generate a .jsonl file that records the generation results and wall time. Then, you can use evaluation/speed.py to calculate the ratio of speeds.
 
