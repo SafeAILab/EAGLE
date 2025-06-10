@@ -223,7 +223,7 @@ world_size = deepspeed.comm.get_world_size()
 if global_rank == 0:
     import wandb
 
-    wandb.login(key="0e62d8630ec46675d4065debb15119367581e674")
+    wandb.login(key="")
     wandb.init(project="l382", entity="yuhui-li", config=ds_config)
 
 os.makedirs(args.savedir, exist_ok=True)
