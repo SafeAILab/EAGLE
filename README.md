@@ -101,7 +101,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - [x] Support Qwen-2.
 - [x] Support vLLM (please check <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>'s implementation).
 - [x] EAGLE-3.
-- [ ] Training code of EAGLE-3.
+- [x] Training code of EAGLE-3.
 - [ ] Support LLaMA-4.
 - [ ] Support Qwen-3.
 
@@ -203,24 +203,12 @@ output=model.tokenizer.decode(output_ids[0])
 
 ## Train
 
-### Generate Train Data
-You can run the following command to generate the training data.
 ```bash
-python -m eagle.ge_data.allocation --outdir [path of data]
+cd eagle/traineagle3
+deepspeed main.py --deepspeed_config ds_config.json
 ```
-### Train the Auto-regression Head
-```bash
-accelerate launch -m --mixed_precision=bf16 eagle.train.main --tmpdir [path of data]\
---cpdir [path of checkpoints] --configpath [path of config file]
-```
-*eagle/train* provides examples of configuration files.
 
-You can also use DeepSpeed for training.
 
-```bash
-cd eagle/train
-deepspeed main_deepspeed.py --deepspeed_config ds_config.json
-```
 
 ### Inference on custom models
 
