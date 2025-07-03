@@ -160,7 +160,8 @@ pip install -r requirements.txt
 | Mixtral-8x7B-Instruct-v0.1 | [yuhuili/EAGLE-mixtral-instruct-8x7B](https://huggingface.co/yuhuili/EAGLE-mixtral-instruct-8x7B)| 0.28B |
 | LLaMA3-Instruct 8B | [yuhuili/EAGLE-LLaMA3-Instruct-8B](https://huggingface.co/yuhuili/EAGLE-LLaMA3-Instruct-8B)| 0.25B | LLaMA3-Instruct 70B| [yuhuili/EAGLE-LLaMA3-Instruct-70B](https://huggingface.co/yuhuili/EAGLE-LLaMA3-Instruct-70B)| 0.99B |
 | Qwen2-7B-Instruct | [yuhuili/EAGLE-Qwen2-7B-Instruct](https://huggingface.co/yuhuili/EAGLE-Qwen2-7B-Instruct)| 0.26B | Qwen2-72B-Instruct| [yuhuili/EAGLE-Qwen2-72B-Instruct](https://huggingface.co/yuhuili/EAGLE-Qwen2-72B-Instruct)| 1.05B |
-| LLaMA3.1-Instruct 8B | [yuhuili/EAGLE-LLaMA3.1-Instruct-8B](https://huggingface.co/yuhuili/EAGLE-LLaMA3.1-Instruct-8B)| 0.25B | | |
+| LLaMA3.1-Instruct 8B | [yuhuili/EAGLE-LLaMA3.1-Instruct-8B](https://huggingface.co/yuhuili/EAGLE-LLaMA3.1-Instruct-8B)| 0.25B |
+| Qwen2.5-14B-Instruct | [Zjcxy-SmartAI/Eagle-Qwen2.5-14B-Instruct](https://huggingface.co/Zjcxy-SmartAI/Eagle-Qwen2.5-14B-Instruct)| 0.33B |||
 
 ## Inference
 The inference code we provide automatically allocates model weights (loading a model across multiple GPUs), allowing you to run models that exceed the memory of a single GPU.
