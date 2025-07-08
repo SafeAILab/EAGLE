@@ -91,7 +91,7 @@ def warmup(model):
         prompt += " "
     input_ids = model.tokenizer([prompt]).input_ids
     input_ids = torch.as_tensor(input_ids).cuda()
-    for output_ids in model.ea_generate(input_ids):
+    for output_ids in model.ea_generate(input_ids, streaming=True):
         ol=output_ids.shape[1]
 
 def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_state,):
@@ -154,7 +154,7 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
     if use_EaInfer:
 
         for output_ids in model.ea_generate(input_ids, temperature=temperature, top_p=top_p,
-                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct"):
+                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct",streaming=True):
             totaltime+=(time.time()-start_time)
             total_ids+=1
             decode_ids = output_ids[0, input_len:].tolist()
@@ -183,7 +183,7 @@ def bot(history, temperature, top_p, use_EaInfer, highlight_EaInfer,session_stat
 
     else:
         for output_ids in model.naive_generate(input_ids, temperature=temperature, top_p=top_p,
-                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct"):
+                                            max_new_tokens=args.max_new_token,is_llama3=args.model_type=="llama-3-instruct",streaming=True):
             totaltime += (time.time() - start_time)
             total_ids+=1
             decode_ids = output_ids[0, input_len:].tolist()

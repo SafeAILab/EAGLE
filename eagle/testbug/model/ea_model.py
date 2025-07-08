@@ -101,7 +101,7 @@ class EaModel(nn.Module):
                 return outputs, orig, hidden_states
 
     @torch.no_grad()
-    def eagenerate(
+    def ea_generate(
             self,
             input_ids,
             temperature=0.0,
@@ -110,6 +110,7 @@ class EaModel(nn.Module):
             max_new_tokens=512,
             max_length=2048,
             tree_choices=mc_sim_7b_63,
+            streaming=False,
 
     ):
         if temperature > 1e-5:
@@ -192,10 +193,15 @@ class EaModel(nn.Module):
                 sample_p
             )
 
+            if streaming:
+                yield input_ids
+
             if new_token > max_new_tokens:
-                return input_ids
+                break
             if input_ids.shape[1] > max_length:
-                return input_ids
+                break
+        if not streaming:
+            return input_ids
 
 
     @torch.no_grad()
