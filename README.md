@@ -103,8 +103,8 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - [x] Support vLLM (please check <a href="https://github.com/vllm-project/vllm/pull/6830">vLLM</a>'s implementation).
 - [x] EAGLE-3.
 - [x] Training code of EAGLE-3.
-- [ ] Support LLaMA-4.
-- [ ] Support Qwen-3.
+- [x] Support LLaMA-4.
+- [x] Support Qwen-3.
 
 ## The default main branch is the implementation of EAGLE-3 and EAGLE-2. For using EAGLE-1, please switch to the v1 branch.
 
