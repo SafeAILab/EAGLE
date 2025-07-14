@@ -44,7 +44,7 @@ outs = []
 input_ids = torch.as_tensor([[1, 2]])
 s = time.time()
 for i in range(500000):
-    output_ids = model.eagenerate(input_ids, temperature=1.0, max_new_tokens=15)
+    output_ids = model.ea_generate(input_ids, temperature=1.0, max_new_tokens=15)
     outs.append(output_ids[:, input_ids.shape[1]:input_ids.shape[1] + 15])
     if i>0 and i%1000==0:
         outstensor = torch.cat(outs, dim=0)

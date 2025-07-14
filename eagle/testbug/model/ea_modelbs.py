@@ -149,7 +149,7 @@ class EaModel(nn.Module):
                 return outputs, orig, hidden_states
 
     @torch.no_grad()
-    def eagenerate(
+    def ea_generate(
             self,
             input_ids,
             attention_mask=None,
@@ -302,7 +302,7 @@ class EaModel(nn.Module):
 
 
     @torch.no_grad()
-    def naivegenerate(
+    def naive_generate(
             self,
             input_ids,
             attention_mask=None,
