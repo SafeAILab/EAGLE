@@ -28,8 +28,7 @@ from torch import nn
 import os
 
 from transformers.activations import ACT2FN
-from transformers import AutoTokenizer
-from modeling_llama_kv import LlamaForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from configs import EConfig
 from safetensors import safe_open
 from datasets import load_dataset
@@ -478,7 +477,7 @@ class Model(nn.Module):
         self.draft_vocab_size = config.draft_vocab_size
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.length = 7
-        self.target_model = LlamaForCausalLM.from_pretrained(path, torch_dtype=torch.float16)
+        self.target_model = AutoModelForCausalLM.from_pretrained(path, torch_dtype=torch.float16)
         self.target_model.eval()
         self.fc=nn.Linear(self.hidden_size*3, self.hidden_size, bias=False)
         for param in self.target_model.parameters():
@@ -691,10 +690,11 @@ class Model(nn.Module):
     @torch.no_grad()
     def dataprepare(self, input_ids, attention_mask, loss_mask):
         device = input_ids.device
-        outs = self.target_model(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_states0 = outs.hidden_states[0]
-        hidden_states1 = outs.hidden_states[1]
-        hidden_states2 = outs.hidden_states[2]
+        outs = self.target_model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+        num_hidden_layers = self.target_model.config.num_hidden_layers
+        hidden_states0 = outs.hidden_states[2]
+        hidden_states1 = outs.hidden_states[num_hidden_layers // 2]
+        hidden_states2 = outs.hidden_states[num_hidden_layers - 3]
         hidden_states=torch.cat((hidden_states0,hidden_states1,hidden_states2),dim=-1)
         # hidden_states=torch.cat((hidden_states0,hidden_states1),dim=-1)
         target = outs.logits
