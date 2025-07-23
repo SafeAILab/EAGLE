@@ -81,6 +81,8 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 
 
 ## Update
+**2025.7.23**: We strongly recommend using [SpecForge](https://github.com/sgl-project/SpecForge) for out-of-the-box training of EAGLE-3 with SGLang.
+
 **2025.3.19**: EAGLE-3 is released.
 
 **2024.8.8**: We now support Qwen-2.
@@ -214,6 +216,8 @@ output=model.tokenizer.decode(output_ids[0])
 cd eagle/traineagle3
 deepspeed main.py --deepspeed_config ds_config.json
 ```
+We strongly recommend using [SpecForge](https://github.com/sgl-project/SpecForge) for out-of-the-box training of EAGLE-3 with SGLang.
+
 
 
 
