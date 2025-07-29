@@ -26,7 +26,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch import nn
 import os
-
+from transformers.integrations.deepspeed import HfDeepSpeedConfig
 from transformers.activations import ACT2FN
 from transformers import AutoTokenizer
 from modeling_llama_kv import LlamaForCausalLM
@@ -259,11 +259,20 @@ class LlamaAttention(nn.Module):
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        cache_hidden[0] = cache_hidden[0] + [key_states]
-        cache_hidden[1] = cache_hidden[1] + [value_states]
+        # Avoid modify hidden cache inplace which will cause in-place modification error when enable gradient checkpoint. 
+        # Return the updated hidden cache instead.
+        if cache_hidden is None:
+            local_cache_k = []
+            local_cache_v = []
+        else:
+            local_cache_k = list(cache_hidden[0])
+            local_cache_v = list(cache_hidden[1])
 
-        cache_k = cache_hidden[0]
-        cache_v = cache_hidden[1]
+        local_cache_k.append(key_states)
+        local_cache_v.append(value_states)
+            
+        cache_k = local_cache_k
+        cache_v = local_cache_v
 
         k0 = cache_k[0]
         v0 = cache_v[0]
@@ -274,7 +283,6 @@ class LlamaAttention(nn.Module):
 
         attn_weights = attn_weights + attention_mask
 
-        min_value = torch.finfo(attention_mask.dtype).min
         for i in range(1, lck):
             ki = cache_k[i]
 
@@ -301,7 +309,9 @@ class LlamaAttention(nn.Module):
 
         attn_output = self.o_proj(attn_output)
 
-        return attn_output
+        # Return the updated hidden cache.
+        new_past_key_value = [local_cache_k,local_cache_v]
+        return attn_output, new_past_key_value
 
 
 class LlamaMLP(nn.Module):
@@ -410,7 +420,7 @@ class LlamaDecoderLayeremb(nn.Module):
         # cache_hidden.append(hidden_states)
 
         # Self Attention
-        hidden_states = self.self_attn(
+        hidden_states, latest_hidden_cache = self.self_attn(
             cache_hidden=cache_hidden,
             hidden_states=hidden_states,
             attention_mask=attention_mask,
@@ -431,7 +441,7 @@ class LlamaDecoderLayeremb(nn.Module):
         outputs = (hidden_states, return_hidden)
 
 
-        return outputs
+        return outputs, latest_hidden_cache
 
 
 @torch.no_grad()
@@ -465,13 +475,21 @@ def merge_dicts(dicts):
     for d in dicts:
         result.update(d)
     return result
+
+
 class Model(nn.Module):
-    def __init__(self, config, load_head=False, load_emb=True, path=None):
-        super().__init__()
+    def __init__(self, config, ds_config, training_config, load_head=False, load_emb=True, path=None):
+        super().__init__() 
         # self.layers = nn.ModuleList(
         #     [LlamaDecoderLayer(config, index=index) for index in range(config.num_hidden_layers)])
+        self.train_config = training_config
+        # Settng dschf to allow efficient ZeRO-3 usage between hf and ds.
+        if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
+            dschf = HfDeepSpeedConfig(ds_config)
+        else:
+            dschf = None
         self.midlayer = LlamaDecoderLayeremb(config)
-        self.gradient_checkpointing = False
+        self.gradient_checkpointing = self.train_config.gradient_checkpointing
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.hidden_size = config.hidden_size
@@ -565,9 +583,13 @@ class Model(nn.Module):
                     input_ids = tokenizer(
                         conversation,
                         return_tensors="pt",
-                        max_length=2048,
                         add_special_tokens=False,
                     ).input_ids[0]
+                    # When construct draft model vocab, 
+                    # filter out samples which is longer than max_len,
+                    # instead of truncating them.
+                    if len(input_ids) > self.train_config.max_len:
+                        continue
                     loss_mask = torch.ones_like(input_ids)
                     # print(i)
 
@@ -781,7 +803,7 @@ class Model(nn.Module):
 
                     return custom_forward
 
-                layer_outputs = torch.utils.checkpoint.checkpoint(
+                layer_outputs, cache_hidden = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(self.midlayer),
                     inputs_embeds,
                     hidden_states,
@@ -791,7 +813,7 @@ class Model(nn.Module):
                 )
             else:
 
-                layer_outputs = self.midlayer(
+                layer_outputs, cache_hidden = self.midlayer(
                     input_emb=inputs_embeds,
                     hidden_states=hidden_states,
                     cache_hidden=cache_hidden,
@@ -810,6 +832,8 @@ class Model(nn.Module):
                 # hidden_states_target = padding(hidden_states, left=False)
                 target_head = target
                 target_max_token = target_head.argmax(-1)
+                # Move d2t to the same device as target_max_token
+                self.t2d = self.t2d.to(target_max_token.device)
                 target_mask = self.t2d[target_max_token]
                 target_mask = target_mask[..., None].int()
                 position_mask = target_mask * loss_mask
