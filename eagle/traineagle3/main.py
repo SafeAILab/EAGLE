@@ -23,6 +23,7 @@ train_config = {
     "num_workers": 2,
     "max_len": 2048,
     "config_path": "config.json",
+    "gradient_checkpoint": True
 }
 
 from safetensors import safe_open
@@ -101,9 +102,11 @@ def build_dataset_rank(
             input_ids = tokenizer(
                 conversation,
                 return_tensors="pt",
-                max_length=2048,
                 add_special_tokens=False,
             ).input_ids[0]
+            # filtering out the samples which is longer than max_len
+            if len(input_ids) > train_config["max_len"]:
+                continue
             loss_mask = torch.ones_like(input_ids)
             # print(i)
 
@@ -204,7 +207,7 @@ traindataset = build_dataset_rank(tokenizer, args.trainpath)
 testdataset = build_dataset_rank(tokenizer, args.testpath)
 
 config = EConfig.from_pretrained(train_config["config_path"])
-model = Model(config, path=args.basepath, load_emb=True, load_head=True)
+model = Model(config, ds_config, train_config, path=args.basepath, load_emb=True, load_head=True)
 model.scandata(args.trainpath, args.basepath)
 
 
@@ -340,7 +343,8 @@ for epoch in range(start_epoch, num_epochs):
         if global_rank == 0:
             wandb.log({f"test/epochploss_{i}": loss_i})
             print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
-
+    # clear out the redundance cahce after each step
+    torch.cuda.empty_cache()
 
     model_engine.save_16bit_model(f"{args.savedir}/state_{epoch}", exclude_frozen_parameters=True)
     if epoch % 10 == 0:
