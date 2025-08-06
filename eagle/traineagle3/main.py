@@ -276,7 +276,7 @@ for epoch in range(start_epoch, num_epochs):
 
         model.zero_grad()
 
-        plosses, vlosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
+        plosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
                                                attention_mask=data["attention_mask"].to(rank),
                                                loss_mask=data["loss_mask"],
                                                )
@@ -321,7 +321,7 @@ for epoch in range(start_epoch, num_epochs):
 
     for batch_idx, data in enumerate(tqdm(test_loader)):
         with torch.no_grad():
-            plosses, vlosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
+            plosses, acces = model_engine(input_ids=data["input_ids"].to(rank),
                                                    attention_mask=data["attention_mask"].to(rank),
                                                    loss_mask=data["loss_mask"],
                                                    )
