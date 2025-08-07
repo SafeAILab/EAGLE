@@ -70,12 +70,12 @@ _Inference is conducted on 2x RTX 3090 GPUs at fp16 precision using the Vicuna 1
 ## Support
 EAGLE has been merged in the following mainstream LLM serving frameworks (listed in alphabetical order).
 
+- <a href="https://rocm.docs.amd.com/en/latest/">AMD ROCm</a>
 - <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">AWS NeuronX Distributed Core</a>
 - <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>
 - <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
 - <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
-- <a href="https://rocm.docs.amd.com/en/latest/">AMD ROCm</a>
 - <a href="https://docs.sglang.ai/backend/speculative_decoding.html">SGLang</a>
 - <a href="https://github.com/sgl-project/SpecForge">SpecForge</a>
 - <a href="https://github.com/vllm-project/vllm/pull/16937">vLLM</a>
