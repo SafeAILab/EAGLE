@@ -77,6 +77,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
 - <a href="https://rocm.docs.amd.com/en/latest/">AMD ROCm</a>
 - <a href="https://docs.sglang.ai/backend/speculative_decoding.html">SGLang</a>
+- <a href="https://github.com/sgl-project/SpecForge">SpecForge</a>
 - <a href="https://github.com/vllm-project/vllm/pull/16937">vLLM</a>
 
 
