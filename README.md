@@ -149,7 +149,9 @@ pip install -r requirements.txt
 | [Qwen/Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B)    | [AngelSlim/Qwen3-8B_eagle3](https://huggingface.co/AngelSlim/Qwen3-8B_eagle3) | [Qwen/Qwen3-30B-A3B](https://huggingface.co/Qwen/Qwen3-30B-A3B)    | [AngelSlim/Qwen3-a3B_eagle3](https://huggingface.co/AngelSlim/Qwen3-a3B_eagle3) |
 | [Qwen/Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B)    | [AngelSlim/Qwen3-4B_eagle3](https://huggingface.co/AngelSlim/Qwen3-4B_eagle3) | [Qwen/Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B)    | [AngelSlim/Qwen3-32B_eagle3](https://huggingface.co/AngelSlim/Qwen3-32B_eagle3) |
 | [Qwen/Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B)    | [AngelSlim/Qwen3-1.7B_eagle3](https://huggingface.co/AngelSlim/Qwen3-1.7B_eagle3) | [Qwen/Qwen3-14B](https://huggingface.co/Qwen/Qwen3-14B)    | [AngelSlim/Qwen3-14B_eagle3](https://huggingface.co/AngelSlim/Qwen3-14B_eagle3) |
-| [openbmb/MiniCPM4-8B](https://huggingface.co/openbmb/MiniCPM4-8B)    | [linglingdan/Eagle3_for_MiniCPM4](https://modelscope.cn/models/linglingdan/Eagle3_for_MiniCPM4) | |  |
+| [openbmb/MiniCPM4-8B](https://huggingface.co/openbmb/MiniCPM4-8B)    | [linglingdan/Eagle3_for_MiniCPM4](https://modelscope.cn/models/linglingdan/Eagle3_for_MiniCPM4) | [allenai/OLMoE-1B-7B-0125-Instruct](https://huggingface.co/allenai/OLMoE-1B-7B-0125-Instruct)     |  [wantsleep/OLMoE_1B_7B_Eagle3](https://huggingface.co/wantsleep/OLMoE_1B_7B_Eagle3) |
+ 
+
 
 
 ## EAGLE Weights
