@@ -75,6 +75,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - <a href="https://github.com/intel/intel-extension-for-transformers/pull/1504">Intel® Extension for Transformers</a>
 - <a href="https://github.com/intel-analytics/ipex-llm/pull/11104">Intel® LLM Library for PyTorch</a>
 - <a href="https://llm.mlc.ai/docs/deploy/rest.html">MLC-LLM</a>
+- <a href="https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/speculative/speculative.html">NVIDIA NeMo Framework</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
 - <a href="https://docs.sglang.ai/advanced_features/speculative_decoding.html">SGLang</a>
 - <a href="https://github.com/sgl-project/SpecForge">SpecForge</a>
