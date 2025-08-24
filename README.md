@@ -80,6 +80,7 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 - <a href="https://docs.nvidia.com/nemo-framework/user-guide/latest/model-optimization/speculative/speculative.html">NVIDIA NeMo Framework</a>
 - <a href="https://github.com/NVIDIA/TensorRT-LLM/tree/main/examples/eagle">NVIDIA TensorRT-LLM</a>
 - <a href="https://nvidia.github.io/TensorRT-Model-Optimizer/guides/7_speculative_decoding.html">NVIDIA TensorRT Model Optimizer</a>
+- <a href="https://paddlenlp.readthedocs.io/en/latest/llm/docs/predict/speculative_decoding.html">PaddleNLP</a>
 - <a href="https://docs.sglang.ai/advanced_features/speculative_decoding.html">SGLang</a>
 - <a href="https://github.com/sgl-project/SpecForge">SpecForge</a>
 - <a href="https://github.com/vllm-project/vllm/pull/16937">vLLM</a>
