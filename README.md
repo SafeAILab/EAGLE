@@ -207,8 +207,8 @@ model = EaModel.from_pretrained(
     low_cpu_mem_usage=True,
     device_map="auto",
     total_token=-1,
-	# If using EAGLE, please uncomment the following line
-	use_eagle3=False
+	# If using EAGLE (not EAGLE 3), please uncomment the following line
+    # use_eagle3=False
 	
 )
 model.eval()
