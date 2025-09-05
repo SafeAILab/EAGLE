@@ -238,7 +238,7 @@ class EaModel(nn.Module):
         input_len = input_ids.shape[1]
         reset_tree_mode(self)
         # prefill
-        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token = initialize_tree(
+        draft_tokens, retrieve_indices, tree_mask, tree_position_ids, logits, hidden_state, sample_token, draft_log_scores = initialize_tree(
             input_ids, self, past_key_values, logits_processor
         )
         new_token = 0
