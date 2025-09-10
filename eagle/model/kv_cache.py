@@ -84,6 +84,7 @@ def initialize_past_key_values(model,max_length=2200):
     """
     # Extracting configuration from the model
     config = model.config
+    print(f'kv cache config: {config}')
     # Initializing the batch size to 1, this can be modified if different batch sizes are required
     batch_size = 1
     # Initializing a tensor to store past keys and values for all layers
@@ -105,7 +106,7 @@ def initialize_past_key_values(model,max_length=2200):
                 batch_size,
                 config.num_key_value_heads,
                 max_length,
-                config.hidden_size // config.num_attention_heads,
+                getattr(config, "head_dim", config.hidden_size // config.num_attention_heads),
                 device=startdevice,
                 dtype=model.dtype,
             )
@@ -118,7 +119,7 @@ def initialize_past_key_values(model,max_length=2200):
         batch_size,
         config.num_key_value_heads,
         max_length,
-        config.hidden_size // config.num_attention_heads,
+        getattr(config, "head_dim", config.hidden_size // config.num_attention_heads),
         device=startdevice,
         dtype=model.dtype,
     )
