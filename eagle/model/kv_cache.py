@@ -84,7 +84,6 @@ def initialize_past_key_values(model,max_length=2200):
     """
     # Extracting configuration from the model
     config = model.config
-    print(f'kv cache config: {config}')
     # Initializing the batch size to 1, this can be modified if different batch sizes are required
     batch_size = 1
     # Initializing a tensor to store past keys and values for all layers

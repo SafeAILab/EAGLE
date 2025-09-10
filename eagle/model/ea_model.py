@@ -53,8 +53,6 @@ class EaModel(nn.Module):
         except:
             bias = True
         if use_eagle3:
-            print("Use Eagle3")
-            print(config)
             self.ea_layer = Model(config, bias=bias, total_tokens=total_token, depth=depth, top_k=top_k,
                                   threshold=threshold, path=base_model_name_or_path,load_emb=True)
         else:
