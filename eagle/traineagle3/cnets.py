@@ -862,10 +862,6 @@ class Model(nn.Module):
                 input_ids = padding(input_ids, left=False)
                 target = padding(target, left=False)
                 loss_mask = padding(loss_mask, left=False)
-                ind=torch.arange(seq_length,device=attention_mask.device)
-                ind0=ind[idx:]
-                ind1=ind[:seq_length-idx]
-                attention_mask[:,:,ind0,ind1]=torch.finfo(attention_mask.dtype).min
 
 
 
