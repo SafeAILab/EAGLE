@@ -1,6 +1,3 @@
----
-license: apache-2.0
----
 <img src="figs/logo.png" alt="EAGLE" width="220" align="left"><div align="center"><h1>&nbsp;EAGLE</h1></div>
 
 <p align="center">
