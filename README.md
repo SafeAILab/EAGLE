@@ -241,6 +241,6 @@ For technical details and full experimental results, please check [the paper of 
       title={{EAGLE-3}: Scaling up Inference Acceleration of Large Language Models via Training-Time Test}, 
       author={Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang},
       booktitle = {Annual Conference on Neural Information Processing Systems},
-	  year = {2025}
+      year = {2025}
 }
 ```
