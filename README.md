@@ -1,32 +1,12 @@
----
-icon: hand-wave
-layout:
-  width: default
-  title:
-    visible: true
-  description:
-    visible: false
-  tableOfContents:
-    visible: true
-  outline:
-    visible: true
-  pagination:
-    visible: true
-  metadata:
-    visible: true
----
+# EAGLE
 
-# README
-
-![EAGLE](figs/logo.png)
-
-## &#x20;EAGLE
+![](figs/logo.png)
 
 <p align="center">| <a href="https://arxiv.org/pdf/2401.15077.pdf">Paper (EAGLE)</a> | <a href="https://arxiv.org/pdf/2406.16858">Paper (EAGLE-2)</a> | <a href="https://arxiv.org/pdf/2503.01840">Paper (EAGLE-3)</a> | <a href="https://sites.google.com/view/eagle-llm">Blog</a> |</p>
 
 <p align="center"><a href="./"><img src="https://img.shields.io/badge/Version-v3.0.0-orange.svg" alt="Version"> </a><a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"> </a><a href="https://github.com/SafeAILab/EAGLE/issues"><img src="https://img.shields.io/badge/Maintained%3F-yes-green.svg" alt="Maintenance"> </a><a href="https://github.com/SafeAILab/EAGLE/pulls"><img src="https://img.shields.io/badge/Contributions-welcome-brightgreen.svg?style=flat" alt="Contributions welcome"></a></p>
 
-###
+### Benchmarking
 
 <div align="center"><img src="figs/eagle3r.jpg" alt="benchmark" width="790"></div>
 
@@ -272,7 +252,3 @@ For technical details and full experimental results, please check [the paper of 
 	  year = {2025}
 }
 ```
-
-### Acknowledgements
-
-This project has been influenced by many excellent projects in the LLM community, such as [Medusa](https://github.com/FasterDecoding/Medusa), [FastChat](https://github.com/lm-sys/FastChat), and others. The logo is designed by GPT-4. We also appreciate many valuable discussions with the SGLang team (James Liu, Ke Bao, Yineng Zhang, Lianmin Zheng, Ying Sheng and many others), Tianle Cai, Hao Zhang, Ziteng Sun, and others.
