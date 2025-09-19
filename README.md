@@ -86,8 +86,6 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 * [x] Support Qwen-3.
 * [ ] EAGLE-4.
 
-### The default main branch is the implementation of EAGLE-3 and EAGLE-2. For using EAGLE-1, please switch to the v1 branch.
-
 ### Contents
 
 * [Setup & Installation](./#setup--installation)
