@@ -220,12 +220,6 @@ python -m eagle.evaluation.gen_baseline_answer_llama3chat --ea-model-path yuhuil
 
 The above two commands will each generate a .jsonl file that records the generation results and wall time. Then, you can use evaluation/speed.py to calculate the ratio of speeds.
 
-### 🌟 Our Contributors
-
-A heartfelt thank you to all our contributors.
-
-![Contributors](https://contrib.rocks/image?repo=SafeAILab/EAGLE)
-
 ### Reference
 
 For technical details and full experimental results, please check [the paper of EAGLE](https://arxiv.org/pdf/2401.15077.pdf), [the paper of EAGLE-2](https://arxiv.org/pdf/2406.16858), and [the paper of EAGLE-3](https://arxiv.org/pdf/2503.01840).
