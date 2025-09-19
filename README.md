@@ -1,3 +1,7 @@
+---
+description: The fastest speculative decoding that exists, used by everyone
+---
+
 # EAGLE
 
 ![](figs/logo.png)
