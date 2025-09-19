@@ -274,14 +274,11 @@ For technical details and full experimental results, please check [the paper of 
 	booktitle = {Empirical Methods in Natural Language Processing},
 	year = {2024}
 }
-@misc{li2025eagle3scalinginferenceacceleration,
+@inproceedings{li2025eagle3,
       title={{EAGLE-3}: Scaling up Inference Acceleration of Large Language Models via Training-Time Test}, 
       author={Yuhui Li and Fangyun Wei and Chao Zhang and Hongyang Zhang},
-      year={2025},
-      eprint={2503.01840},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2503.01840}, 
+      booktitle = {Annual Conference on Neural Information Processing Systems},
+	  year = {2025}
 }
 ```
 
