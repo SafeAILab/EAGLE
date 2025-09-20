@@ -87,6 +87,8 @@ EAGLE has been merged in the following mainstream LLM serving frameworks (listed
 
 
 ## Update
+**2025.9.18**: EAGLE-3 is accepted to NeurIPS'25.
+
 **2025.7.23**: We strongly recommend using [SpecForge](https://github.com/sgl-project/SpecForge) for out-of-the-box training of EAGLE-3 with SGLang.
 
 **2025.3.19**: EAGLE-3 is released.
