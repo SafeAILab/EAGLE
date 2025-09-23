@@ -1,5 +1,5 @@
 torch==2.6.0
-transformers>=4.47.0
+transformers>=4.53.1
 accelerate==0.26.0
 fschat==0.2.31
 gradio==3.50.2
