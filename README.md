@@ -70,7 +70,7 @@ _Inference is conducted on 2x RTX 3090 GPUs at fp16 precision using the Vicuna 1
 ## Support
 EAGLE has been merged in the following mainstream LLM serving frameworks (listed in alphabetical order).
 
-- <a href="https://rocm.docs.amd.com/en/latest/">AMD ROCm</a>
+- <a href="https://rocm.blogs.amd.com/software-tools-optimization/mtp/README.html">AMD ROCm</a>
 - <a href="https://angelslim.readthedocs.io/zh-cn/latest/features/speculative_decoding/eagle.html">AngelSlim</a>
 - <a href="https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-inference/developer_guides/feature-guide.html#eagle-speculative-decoding">AWS NeuronX Distributed Core</a>
 - <a href="https://github.com/OpenBMB/CPM.cu">CPM.cu</a>
