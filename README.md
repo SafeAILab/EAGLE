@@ -197,7 +197,7 @@ python -m eagle.application.webui --ea-model-path [path of EAGLE weight]\
 The *total-token* is the number of draft tokens. For smaller models and advanced GPUs, this value can be set larger. Adjusting according to the specific device and model can achieve better results. If set to -1, EAGLE-2 will automatically configure this parameter.
 
 ### With Code
-You can use our provided "eagenerate" for speedup generation just like using 'generate' from Hugging Face. Here is an example.
+You can use our provided "ea_generate" for speedup generation just like using 'generate' from Hugging Face. Here is an example.
 ```python
 from eagle.model.ea_model import EaModel
 from fastchat.model import get_conversation_template
@@ -217,7 +217,7 @@ conv.append_message(conv.roles[1], None)
 prompt = conv.get_prompt()
 input_ids=model.tokenizer([prompt]).input_ids
 input_ids = torch.as_tensor(input_ids).cuda()
-output_ids=model.eagenerate(input_ids,temperature=0.5,max_new_tokens=512)
+output_ids=model.ea_generate(input_ids,temperature=0.5,max_new_tokens=512)
 output=model.tokenizer.decode(output_ids[0])
 ```
 
