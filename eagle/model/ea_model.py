@@ -13,6 +13,7 @@ from .modeling_llama_kv import LlamaForCausalLM as KVLlamaForCausalLM
 from .modeling_mixtral_kv import MixtralForCausalLM as KVMixtralForCausalLM
 #from .modeling_qwen2_kv import LlamaForCausalLM as KVQwen2ForCausalLM
 from .modeling_qwen2_kv import Qwen2ForCausalLM as KVQwen2ForCausalLM
+from .modeling_qwen3_kv import Qwen3ForCausalLM as KVQwen3ForCausalLM
 from .utils import *
 from .kv_cache import initialize_past_key_values
 
@@ -105,6 +106,10 @@ class EaModel(nn.Module):
             )
         elif Type == 'Qwen2ForCausalLM':
             base_model = KVQwen2ForCausalLM.from_pretrained(
+                base_model_path, **kwargs
+            )
+        elif Type == 'Qwen3ForCausalLM':
+            base_model = KVQwen3ForCausalLM.from_pretrained(
                 base_model_path, **kwargs
             )
         else:
