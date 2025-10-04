@@ -862,11 +862,11 @@ class Model(nn.Module):
                 input_ids = padding(input_ids, left=False)
                 target = padding(target, left=False)
                 loss_mask = padding(loss_mask, left=False)
-                position_ids += 1
 
 
 
         return plosses, vlosses, acces
+
 
 
 
