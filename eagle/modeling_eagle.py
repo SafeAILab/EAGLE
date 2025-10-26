@@ -903,11 +903,10 @@ class EAGLEModel(nn.Module):
 
             for i in range(len(self.tree_buffer['tree_indices'])):
                 if logits_processor is not None:
-                    topk_index, topk_prob, op = self.sample(last_headout, logits_processor, k=top_k, )
+                    topk_index, topk_prob, op = self.sample(last_headout, logits_processor, k=top_k)
                 else:
-                    topk_index, topk_prob = torch.topk(last_headout, top_k, dim=-1).indices, torch.topk(last_headout,
-                                                                                                        top_k,
-                                                                                                        dim=-1).values
+                    topk_results = torch.topk(last_headout, top_k, dim=-1)
+                    topk_index, topk_prob = topk_results.indices, topk_results.values
                     op = None
 
                 ss_token.append(topk_index)
@@ -1733,4 +1732,5 @@ class EAGLE:
         if len(out_inputids)==1:
             return out_inputids[0]
         return out_inputids
+
 
