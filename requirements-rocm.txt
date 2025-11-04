@@ -1,5 +1,5 @@
 --extra-index-url https://download.pytorch.org/whl/rocm6.3
-torch==2.6.0
+torch==2.6.0+rocm6.3
 transformers>=4.47.0
 accelerate==0.26.0
 fschat==0.2.31
