@@ -140,7 +140,7 @@ class EaModel(nn.Module):
             input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
             # Clone the output hidden states
 
-            ea_logits = self.ea_layer.topK_genrate(hidden_states, input_ids, self.base_model.lm_head, logits_processor,attention_mask=attention_mask)
+            ea_logits = self.ea_layer.topK_generate(hidden_states, input_ids, self.base_model.lm_head, logits_processor,attention_mask=attention_mask)
             if output_orig:
                 return ea_logits, outputs, orig, hidden_states, token
             return ea_logits, hidden_states, token
