@@ -10,9 +10,9 @@ setup(
     url='https://github.com/SafeAILab/EAGLE',
     packages=find_packages(),
     install_requires=[
-        'torch==2.0.1',
-        'transformers==4.46.2',
-        'accelerate==0.21.0',
+        'torch>=2.6.0',
+        'transformers>=4.53.3,<5',
+        'accelerate>=0.26.0',
         'fschat==0.2.31',
         'gradio==3.50.2',
         'openai==0.28.0',
