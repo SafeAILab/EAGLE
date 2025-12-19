@@ -860,7 +860,7 @@ class EAGLEModel(nn.Module):
         return sampled_indices, sampled_probs, probabilities
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor, max_length=4, use_cache=True,
+    def topK_generate(self, hidden_states, input_ids, head, logits_processor, max_length=4, use_cache=True,
                      attention_mask=None, len_posi=None, ):
         top_k = 5
         bs = input_ids.shape[0]
@@ -1272,7 +1272,7 @@ def initialize_tree(input_ids, model, logits_processor, attention_mask=None):
         token = token[:, None]
     input_ids = torch.cat((input_ids, token.to(input_ids.device)), dim=1)
 
-    tree_logits = model.ea_layer.topK_genrate(hidden_states, input_ids, model.base_model.lm_head, logits_processor,
+    tree_logits = model.ea_layer.topK_generate(hidden_states, input_ids, model.base_model.lm_head, logits_processor,
                                            attention_mask=attention_mask)
 
 
@@ -1543,7 +1543,7 @@ def update_inference_inputs(
 
 
 
-    tree_logits = model.ea_layer.topK_genrate(draft_hidden,
+    tree_logits = model.ea_layer.topK_generate(draft_hidden,
                                               input_ids=draft_input_ids,
                                               head=model.base_model.lm_head, logits_processor=logits_processor,attention_mask=attention_mask,len_posi=input_ids.shape[1])
 
