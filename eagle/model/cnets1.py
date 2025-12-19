@@ -777,8 +777,30 @@ class Model(nn.Module):
         tree_position_ids = torch.sum(tree_mask, dim=1) - 1
 
         tree_mask = tree_mask.float()[None, None]
+        ########################################
+        # Change
+        ########################################
+        # top_scores_index = torch.sort(top_scores.indices).values
+
+        # get the cumulative log-probs (log-densities) for the selected drafts
+        draft_log_scores = scores_list[top_scores_index]            # shape [total_tokens]
+        # convert to probabilities if you prefer:
+        # draft_probs = torch.exp(draft_log_scores)                  # shape [total_tokens]
+        
+        # then build draft_tokens as before
+        draft_tokens = ss_token_list[top_scores_index]
+        draft_tokens = torch.cat((sample_token, draft_tokens), dim=0)
+        
+        # make sure device is consistent
+        draft_log_scores = draft_log_scores.to(draft_tokens.device)[None]   # shape [1, total_tokens]
+        # draft_probs = draft_probs.to(draft_tokens.device)[None]
+        ########################################
+        # Change
+        ########################################
+
         draft_tokens = draft_tokens[None]
 
+        
         del parents_list, scores_list, ss_token, ss_token_list, draft_parents
 
         # with Timer("retrieve"):
@@ -819,7 +841,7 @@ class Model(nn.Module):
         del mask_index, mask_index_list, noleaf_index, noleaf_num, leaf_num, max_depth, rid
         tree_position_ids = tree_position_ids.to(hidden_states.device)
 
-        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids
+        return draft_tokens, retrieve_indices, tree_mask, tree_position_ids, draft_log_scores
 
 
 
@@ -832,4 +854,5 @@ def count_parameters(model):
 if __name__ == "__main__":
     config = EConfig.from_pretrained('config.json')
     model = Model(config, load_emb=False)
+
     print(model)
