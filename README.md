@@ -147,6 +147,8 @@ pip install -r requirements.txt
 ```
 ## EAGLE-3 Weights
 
+*Note:* This repository recognizes only official EAGLE-3 checkpoints. Performance of unofficial checkpoints may vary.
+
 ## EAGLE-3 Models on Hugging Face
 
 | Base Model | EAGLE-3 Model(s) | Official |
