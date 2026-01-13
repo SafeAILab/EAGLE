@@ -147,7 +147,7 @@ pip install -r requirements.txt
 ```
 ## EAGLE-3 Weights
 
-*Note:* This repository recognizes only official EAGLE-3 checkpoints. Performance of unofficial checkpoints may vary.
+*Note:* This repository recognizes only official EAGLE-3 checkpoints. Performance of unofficial checkpoints may vary. If you want to compare with EAGLE-3, please compare with official checkpoints and official draft tree setups.
 
 ## EAGLE-3 Models on Hugging Face
 
