@@ -218,6 +218,7 @@ The *total-token* is the number of draft tokens. For smaller models and advanced
 ### With Code
 You can use our provided "eagenerate" for speedup generation just like using 'generate' from Hugging Face. Here is an example.
 ```python
+import torch
 from eagle.model.ea_model import EaModel
 from fastchat.model import get_conversation_template
 model = EaModel.from_pretrained(
@@ -226,7 +227,10 @@ model = EaModel.from_pretrained(
     torch_dtype=torch.float16,
     low_cpu_mem_usage=True,
     device_map="auto",
-    total_token=-1
+    total_token=-1,
+	# If using EAGLE (not EAGLE 3), please uncomment the following line
+    # use_eagle3=False
+	
 )
 model.eval()
 your_message="Hello"
