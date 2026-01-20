@@ -23,7 +23,7 @@ train_config = {
     "num_workers": 2,
     "max_len": 2048,
     "config_path": "config.json",
-    "gradient_checkpoint": True
+    "gradient_checkpointing": True
 }
 
 from safetensors import safe_open
