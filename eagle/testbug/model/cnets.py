@@ -569,7 +569,7 @@ class Model(nn.Module):
 
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
+    def topK_generate(self, hidden_states, input_ids, head, logits_processor,max_length=4, use_cache=True):
         input_ids = input_ids[:, 1:]
         ss_token,ss_prob,ss_op = [],[],[]
         len_posi=input_ids.shape[1]

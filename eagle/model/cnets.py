@@ -667,7 +667,7 @@ class Model(nn.Module):
         self.stable_kv = None
 
     @torch.no_grad()
-    def topK_genrate(self, hidden_states, input_ids, head, logits_processor):
+    def topK_generate(self, hidden_states, input_ids, head, logits_processor):
 
         input_ids = input_ids.to(hidden_states.device)
         total_tokens = self.total_tokens
