@@ -489,7 +489,7 @@ class Model(nn.Module):
         else:
             dschf = None
         self.midlayer = LlamaDecoderLayeremb(config)
-        self.gradient_checkpointing = self.train_config.gradient_checkpointing
+        self.gradient_checkpointing = self.train_config["gradient_checkpointing"]
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
         self.hidden_size = config.hidden_size
@@ -588,7 +588,7 @@ class Model(nn.Module):
                     # When construct draft model vocab, 
                     # filter out samples which is longer than max_len,
                     # instead of truncating them.
-                    if len(input_ids) > self.train_config.max_len:
+                    if len(input_ids) > self.train_config["max_len"]:
                         continue
                     loss_mask = torch.ones_like(input_ids)
                     # print(i)
