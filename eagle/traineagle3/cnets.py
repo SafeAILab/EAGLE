@@ -725,6 +725,7 @@ class Model(nn.Module):
 
         if target is not None:
             target = target.to(device)
+            loss_mask[..., -1] = 0  # Exclude last position (now contains padding)
             loss_mask = loss_mask[..., None]
             loss_mask = loss_mask.to(device)
 
