@@ -483,7 +483,7 @@ class Model(nn.Module):
         # self.layers = nn.ModuleList(
         #     [LlamaDecoderLayer(config, index=index) for index in range(config.num_hidden_layers)])
         self.train_config = training_config
-        # Settng dschf to allow efficient ZeRO-3 usage between hf and ds.
+        # Setting dschf to allow efficient ZeRO-3 usage between hf and ds.
         if ds_config is not None and ds_config["zero_optimization"]["stage"] == 3:
             dschf = HfDeepSpeedConfig(ds_config)
         else:
@@ -826,7 +826,7 @@ class Model(nn.Module):
 
             hidden_states_out = layer_outputs[0]
             # cache_hidden.append(layer_outputs[1])
-            # kv_cahce = layer_outputs[-1]
+            # kv_cache = layer_outputs[-1]
 
             with torch.no_grad():
                 # hidden_states_target = padding(hidden_states, left=False)

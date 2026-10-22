@@ -174,7 +174,7 @@ class EAGLEDynamicNTKScalingRotaryEmbedding(EAGLERotaryEmbedding):
 
 class EAGLE_Config(PretrainedConfig):
     r"""
-    Copyed from LlamaConfig, the structure of EAGLE consists of a single LlamaDecoder layer.
+    Copied from LlamaConfig, the structure of EAGLE consists of a single LlamaDecoder layer.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.

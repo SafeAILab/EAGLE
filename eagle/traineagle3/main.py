@@ -343,7 +343,7 @@ for epoch in range(start_epoch, num_epochs):
         if global_rank == 0:
             wandb.log({f"test/epochploss_{i}": loss_i})
             print(f"Test Epoch [{epoch + 1}/{num_epochs}], position {i}, pLoss: {loss_i:.2f}")
-    # clear out the redundance cahce after each step
+    # clear out the redundant cache after each step
     torch.cuda.empty_cache()
 
     model_engine.save_16bit_model(f"{args.savedir}/state_{epoch}", exclude_frozen_parameters=True)
